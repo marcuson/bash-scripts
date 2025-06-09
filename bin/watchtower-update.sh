@@ -10,7 +10,7 @@ while [ -L "$fsource" ]; do # resolve $SOURCE until the file is no longer a syml
 done
 scriptDir=$( cd -P "$( dirname "$fsource" )" >/dev/null 2>&1 && pwd )
 
-OPTSTRING=":k"
+OPTSTRING=":k:"
 
 while getopts ${OPTSTRING} opt; do
   case ${opt} in
@@ -38,4 +38,13 @@ if [ -z "$wtApiToken" ]; then
   exit 1
 fi
 
-curl -H "Authorization: Bearer $wtApiToken" ${wtBaseUrl}/v1/update || [ $? -eq 52 ]
+set +e
+
+curl --max-time 10 --silent --show-error -H "Authorization: Bearer $wtApiToken" ${wtBaseUrl}/v1/update
+curlExitCode=$?
+if [[ $curlExitCode -eq 52 || $curlExitCode -eq 28 ]]; then
+  exit 0
+else
+  echo "curl error, exit code '${curlExitCode}'"
+  exit $curlExitCode
+fi
