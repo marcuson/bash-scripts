@@ -30,7 +30,7 @@ scriptDir=$( cd -P "$( dirname "$fsource" )" >/dev/null 2>&1 && pwd )
 
 # shift $((OPTIND-1))
 
-configDir=${1:-/config}
+configDir=${1:-/dagu}
 logsDir="$configDir/logs"
 
 if [ ! -d "${configDir}" ]; then
