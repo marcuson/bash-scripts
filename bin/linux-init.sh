@@ -311,6 +311,13 @@ function do_run_step_0() {
     LinuxInitMod:configGit || IO:die "Failed to configure Git"
   fi
 
+  # Install cockpit
+  if LinuxInitMod:checkInitConfig "LI__INSTALL_COCKPIT__IS_ENABLED"; then
+    LinuxInitMod:printSep
+    # shellcheck source=linux-init.mod/s0.install-cockpit.sh
+    . "$modules_d/s0.install-cockpit.sh"
+    LinuxInitMod:installCockpit || IO:die "Failed to install Cockpit"
+  fi
   # Pass 1 done
   echo "1" | tee "$helper_f" >/dev/null
   LinuxInitMod:printSep
