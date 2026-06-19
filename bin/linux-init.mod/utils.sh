@@ -231,3 +231,185 @@ LinuxInitMod:callStack() {
         ((i++))
     done
 }
+
+# Add a trap
+LinuxInitMod:addTrap() {
+    local cmd=$1         # command(s) to add
+    local sig=${2:-EXIT} # signal name or number
+
+    # validate signal name or numeric id
+    local sig_name
+    {
+        if [[ $sig =~ ^[0-9]+$ ]]; then
+            sig_name=$(kill -l "$sig")
+        else
+            sig_name=${sig^^}
+            kill -l "$sig_name" &>/dev/null
+        fi
+    } || {
+        echo "add_trap: invalid signal '$sig'" >&2
+        return 1
+    }
+
+    # Compute effective trap list for current (sub)shell
+    # Based on info from https://stackoverflow.com/a/59307894/5116073
+    local old
+    if [[ "${BASH_VERSINFO:-0}" -ge 4 ]]; then
+        trap -- KILL &>/dev/null || true
+        old=$(trap -p "$sig_name")
+    else
+        old=$( (trap -p "$sig_name"))
+    fi
+
+    # extract/cleanup the existing registered command(s)
+    old=${old#*\'}         # remove leading "trap -- '"
+    old=${old%\'*}         # remove trailing "' EXIT"
+    old=${old//"'\''"/"'"} # unescape every '\'' to '
+
+    # if command is already registered, do nothing
+    if [[ ";$old;" == *";$cmd;"* ]]; then
+        return 0
+    fi
+
+    # build the new combined handler
+    if [[ -n $old ]]; then
+        combined="$old;$cmd"
+    else
+        combined="$cmd"
+    fi
+
+    # register the new combined handler
+    trap -- "$combined" "$sig"
+}
+
+# Login to Bitwarden and unlock vault
+LinuxInitMod:bwUnlock() {
+    if [ -z "${bw_helper_f}" ]; then
+        IO:alert "Bitwarden helper file path not set, cannot proceed"
+        return 1
+    fi
+    if [ ! -f "${bw_helper_f}" ]; then
+        IO:alert "Bitwarden helper file path does not exist, cannot proceed"
+        return 1
+    fi
+
+    if [ -z "${LI__BW__URL:-}" ]; then
+        IO:alert "Missing LI__BW__URL config, cannot proceed"
+        return 1
+    fi
+    if [ -z "${LI__BW__CLIENT_ID:-}" ]; then
+        IO:alert "Missing LI__BW__CLIENT_ID config, cannot proceed"
+        return 1
+    fi
+    if [ -z "${LI__BW__CLIENT_SECRET:-}" ]; then
+        IO:alert "Missing LI__BW__CLIENT_SECRET config, cannot proceed"
+        return 1
+    fi
+    if [ -z "${LI__BW__MASTER_PASSWORD:-}" ]; then
+        IO:alert "Missing LI__BW__MASTER_PASSWORD config, cannot proceed"
+        return 1
+    fi
+
+    export BW_CLIENTID="${LI__BW__CLIENT_ID:-}"
+    export BW_CLIENTSECRET="${LI__BW__CLIENT_SECRET:-}"
+    export BW_MASTER_PASSWORD="${LI__BW__MASTER_PASSWORD:-}"
+
+    local bw_url
+    local bw_status
+    local session
+
+    bw_url=$(bw status | jq -r .serverUrl 2>/dev/null)
+    if [[ "$bw_url" != "$LI__BW__URL" ]]; then
+        IO:print "Configuring Bitwarden CLI to use server URL '$LI__BW__URL'" >/dev/tty
+        LinuxInitMod:bwLogout
+        bw config server "$LI__BW__URL" >/dev/tty || IO:die "Bitwarden config failed"
+    fi
+
+    bw_status=$(bw status | jq -r .status)
+    if [ -z "$bw_status" ] || [ "$bw_status" = "unauthenticated" ]; then
+        IO:print "Bitwarden: login"
+        bw login --apikey || IO:die "Bitwarden login failed"
+    fi
+
+    bw_status=$(bw status | jq -r .status)
+    if [ "$bw_status" = "locked" ]; then
+        IO:print "Bitwarden: unlock"
+        session=$(bw unlock --passwordenv BW_MASTER_PASSWORD --raw) || IO:die "Bitwarden unlock failed"
+        echo "$session" >>"$bw_helper_f"
+        export BW_SESSION="$session"
+    fi
+
+    bw sync --force
+}
+
+# Lock and invalidate specific BW session
+LinuxInitMod:bwLockSession() {
+    Os:require bw "snap install bw"
+
+    local session
+    session="$1"
+    local bw_status
+
+    bw_status=$(BW_SESSION="$session" bw status | jq -r .status)
+    if [ -z "$bw_status" ] || [ "$bw_status" = "unauthenticated" ]; then
+        IO:print "Bitwarden: no logged in"
+        return 0
+    fi
+
+    if ! BW_SESSION="$session" bw lock; then
+        IO:alert "Failed to invalidate Bitwarden session"
+        return 1
+    fi
+
+    IO:print "Bitwarden session invalidated"
+    return 0
+}
+
+# Lock Bitwarden vault and invalidate session (also old ones)
+LinuxInitMod:bwLock() {
+    Os:require bw "snap install bw"
+
+    IO:print "Invalidating Bitwarden sessions from helper file"
+    if [ -n "${bw_helper_f:-}" ] && [ -f "$bw_helper_f" ]; then
+        while IFS= read -r line; do
+            LinuxInitMod:bwLockSession "$line"
+        done <"$bw_helper_f"
+    fi
+
+    unset BW_SESSION
+    cat /dev/null >|"$bw_helper_f"
+
+    return 0
+}
+
+# Copy value from Bitwarden vault
+LinuxInitMod:bwGet() {
+    Os:require bw "snap install bw"
+
+    if [ $# -lt 1 ]; then
+        IO:alert "Usage: LinuxInitMod:bwGet <item-name> [property]"
+        return 2
+    fi
+
+    local item_name="$1"
+    local item_field="${2:-item}"
+
+    LinuxInitMod:bwUnlock &>/dev/tty
+
+    bw get "$item_field" "$item_name"
+}
+
+# Get custom field value from Bitwarden vault
+LinuxInitMod:bwGetCF() {
+    Os:require bw "snap install bw"
+
+    if [ $# -lt 2 ]; then
+        IO:alert "Usage: LinuxInitMod:bwGetCF <item-name> <field-name>"
+        return 2
+    fi
+
+    local item_name="$1"
+    local custom_field="$2"
+
+    LinuxInitMod:bwGet "$item_name" | jq -r ".fields[] | select(.name==\"$custom_field\") | .value"
+}

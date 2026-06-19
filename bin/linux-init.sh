@@ -99,6 +99,7 @@ function Script:main() {
 
   # Constants
   readonly progress_filename="$script_prefix.progress"
+  readonly bw_filename="$script_prefix.bw"
   readonly modules_d="$script_install_folder/linux-init.mod"
 
   ## TO ADD A NEW VERB: 1) add it to choice line in Option:config()
@@ -181,6 +182,10 @@ function do_run() {
   # shellcheck source=linux-init.mod/utils.sh
   . "$modules_d/utils.sh"
 
+  LinuxInitMod:addTrap "LinuxInitMod:bwLock" INT
+  LinuxInitMod:addTrap "LinuxInitMod:bwLock" TERM
+  LinuxInitMod:addTrap "LinuxInitMod:bwLock" EXIT
+
   LinuxInitMod:ensureVar LI__USER "normal user name"
 
   if ! LinuxInitMod:isNormalUser "$LI__USER"; then
@@ -188,24 +193,51 @@ function do_run() {
   fi
 
   home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
-  helper_f="$home_user_d/${progress_filename}"
+  home_init_user_d="$home_user_d/.$script_prefix"
+  helper_f="$home_init_user_d/${progress_filename}"
+  bw_helper_f="$home_init_user_d/${bw_filename}"
 
-  # Create helper file if not found
+  # Create helper files if not found
+  sudo -u "$LI__USER" mkdir -p "$home_init_user_d"
   if [ ! -f "$helper_f" ]; then
     echo "0" | sudo -u "$LI__USER" tee "$helper_f" >/dev/null
   fi
 
+  if [ ! -f "$bw_helper_f" ]; then
+    sudo -u "$LI__USER" touch "$bw_helper_f" >/dev/null
+  fi
+
+  # Override run
+  if [[ $(type -t do_run_step_override) == "function" ]]; then
+    do_run_step_override
+    LinuxInitMod:bwLock
+    Script:exit
+  fi
+
+  # Normal run
   helper_f_content=$(<"$helper_f")
 
   if [[ "$helper_f_content" == "2" ]]; then
     IO:print "All config already done, exiting."
-    Script:exit
   elif [[ "$helper_f_content" == "0" ]]; then
     do_run_step_0
   elif [[ "$helper_f_content" == "1" ]]; then
     do_run_step_1
   fi
+
+  LinuxInitMod:bwLock
+  Script:exit
 }
+
+# Uncomment and modify for contained manual testing
+# function do_run_step_override() {
+#   LinuxInitMod:printSep
+#   IO:print "Linux init start (OVERRIDE)"
+
+#   # shellcheck source=linux-init.mod/s0.komodo-prep.sh
+#   . "$modules_d/s0.komodo-prep.sh"
+#   LinuxInitMod:komodoPrep || IO:die "Failed to prep Komodo"
+# }
 
 function do_run_step_0() {
   IO:print "First init pass"
@@ -311,19 +343,38 @@ function do_run_step_0() {
     LinuxInitMod:configGit || IO:die "Failed to configure Git"
   fi
 
-  # Install cockpit
-  if LinuxInitMod:checkInitConfig "LI__INSTALL_COCKPIT__IS_ENABLED"; then
+  # Install oh-my-posh
+  if LinuxInitMod:checkInitConfig "LI__INSTALL_OH_MY_POSH__IS_ENABLED"; then
     LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.install-cockpit.sh
-    . "$modules_d/s0.install-cockpit.sh"
-    LinuxInitMod:installCockpit || IO:die "Failed to install Cockpit"
+    # shellcheck source=linux-init.mod/s0.install-oh-my-posh.sh
+    . "$modules_d/s0.install-oh-my-posh.sh"
+    LinuxInitMod:installOhMyPosh || IO:die "Failed to install oh-my-posh"
   fi
-  # Pass 1 done
+
+  # Install SOPS
+  if LinuxInitMod:checkInitConfig "LI__INSTALL_SOPS__IS_ENABLED"; then
+    LinuxInitMod:printSep
+    # shellcheck source=linux-init.mod/s0.install-sops.sh
+    . "$modules_d/s0.install-sops.sh"
+    LinuxInitMod:installSops || IO:die "Failed to install SOPS"
+  fi
+
+  # Prep Komodo
+  if LinuxInitMod:checkInitConfig "LI__KOMODO_PREP__IS_ENABLED"; then
+    LinuxInitMod:printSep
+    # shellcheck source=linux-init.mod/s0.komodo-prep.sh
+    . "$modules_d/s0.komodo-prep.sh"
+    LinuxInitMod:komodoPrep || IO:die "Failed to prep Komodo"
+  fi
+
+  # Pass 0 done
   echo "1" | tee "$helper_f" >/dev/null
   LinuxInitMod:printSep
   IO:success "First part of the config done"
+  IO:print ""
   IO:print "Please check sshd config using 'sudo sshd -t' command and fix any problem before rebooting"
   IO:print "If the command sudo sshd -t has no output the config is ok"
+  IO:print ""
   IO:print "Reboot and run this script again to finalize the configuration"
   Script:exit
 }
