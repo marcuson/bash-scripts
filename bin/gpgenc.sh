@@ -171,6 +171,7 @@ function do_decrypt() {
     local pass="$PASSPHRASE"
     local out_f
     out_f=$(basename "$in_f")
+    out_f="${out_f%.*}"
 
     if [ -z "$pass" ]; then
         IO:die "Passpharase should be set with -p"
