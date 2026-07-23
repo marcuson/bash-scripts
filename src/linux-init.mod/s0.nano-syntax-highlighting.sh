@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
 
-LinuxInitMod:enableNanoSyntaxHighlighting() {
-    IO:print "Enabling Nano Syntax highlighting"
+Mbs:LinuxInit:enableNanoSyntaxHighlighting() {
+    Mbs:Io:print "Enabling Nano Syntax highlighting"
 
-    if LinuxInitMod:isVarEmpty "$LI__USER"; then
-        IO:print "Missing LI__USER, please enter the normal user name and press enter: "
-        read -r
-        LI__USER="$REPLY"
+    if ! Mbs:User:isNormal "$LI__USER"; then
+        Mbs:Script:die "\nLI__USER problem, it must be set, it must be a normal user, it must exists"
     fi
 
-    if ! LinuxInitMod:isNormalUser "$LI__USER"; then
-        IO:alert "\nLI__USER problem, it must be set, it must be a normal user, it must exists"
-        return 1
-    fi
-
-    if LinuxInitMod:isVarEmpty "$home_user_d"; then
+    if Mbs:Var:isEmpty "$home_user_d"; then
         home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
     fi
 
@@ -27,14 +20,14 @@ LinuxInitMod:enableNanoSyntaxHighlighting() {
     if [ ! -f "$nano_conf_root_f" ] || ! grep -q 'include "/usr/share/nano/\*.nanorc' "$nano_conf_root_f"; then
         echo -e 'include "/usr/share/nano/*.nanorc"\nset linenumbers' | tee -a "$nano_conf_root_f" >/dev/null
     else
-        IO:print "$nano_conf_root_f already configured"
+        Mbs:Io:print "$nano_conf_root_f already configured"
     fi
 
     if [ ! -f "$nano_conf_user_f" ] || ! grep -q 'include "/usr/share/nano/\*.nanorc' "$nano_conf_user_f"; then
         echo -e 'include "/usr/share/nano/*.nanorc"\nset linenumbers' | sudo -u "$LI__USER" tee -a "$nano_conf_user_f" >/dev/null
     else
-        IO:print "$nano_conf_user_f already configured"
+        Mbs:Io:print "$nano_conf_user_f already configured"
     fi
-    IO:print "Nano Syntax highlighting enabled"
+    Mbs:Io:print "Nano Syntax highlighting enabled"
     return 0
 }

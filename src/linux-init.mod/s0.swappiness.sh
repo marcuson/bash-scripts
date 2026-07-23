@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-LinuxInitMod:setSwappiness() {
+Mbs:LinuxInit:setSwappiness() {
     # Defaults
     local swappiness_default=60
     # Dirs
@@ -8,9 +8,9 @@ LinuxInitMod:setSwappiness() {
     # Apply default if conf is not found
     local swappiness="${LI__RAM_SWAPPINESS__VALUE:=$swappiness_default}"
 
-    IO:print "Setting custom swappiness"
-    IO:print "New swappiness value: $swappiness"
+    Mbs:Io:print "Setting custom swappiness"
+    Mbs:Io:print "New swappiness value: $swappiness"
     echo "vm.swappiness=$swappiness" | tee "$swappiness_conf_f" >/dev/null
-    IO:print "Custom swappiness set, it will be applied from the next reboot"
+    Mbs:Io:print "Custom swappiness set, it will be applied from the next reboot"
     return 0
 }

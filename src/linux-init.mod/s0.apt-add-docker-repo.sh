@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
-LinuxInitMod:aptAddDockerRepo() {
-  IO:print "Add Docker repo to APT"
+# !mbs meta require-tools curl
+
+Mbs:LinuxInit:aptAddDockerRepo() {
+  Mbs:Io:print "Add Docker repo to APT"
 
   local docker_gpg_f="/etc/apt/keyrings/docker.asc"
   local docker_list_f="/etc/apt/sources.list.d/docker.list"
@@ -14,7 +16,7 @@ LinuxInitMod:aptAddDockerRepo() {
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o "${docker_gpg_f}"
     chmod a+r "${docker_gpg_f}"
   else
-    IO:print "Docker repo GPG key already added"
+    Mbs:Io:print "Docker repo GPG key already added"
   fi
 
   # Add the repository to Apt sources
@@ -27,9 +29,9 @@ LinuxInitMod:aptAddDockerRepo() {
       tee "${docker_list_f}" >/dev/null
     apt update
   else
-    IO:print "Docker repo already added"
+    Mbs:Io:print "Docker repo already added"
   fi
 
-  IO:print "Docker APT repo added and configured"
+  Mbs:Io:print "Docker APT repo added and configured"
   return 0
 }

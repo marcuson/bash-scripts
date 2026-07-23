@@ -2,91 +2,438 @@
 
 # Inspired by https://gist.github.com/Tras2/cba88201b17d765ec065ccbedfb16d9a
 
-# A bash script to update a Cloudflare DNS A record with the external IP of the source machine
-# Needs the DNS record pre-creating on Cloudflare
+# @describe A bash script to update a Cloudflare DNS A record with the external IP of the source machine.
+# Needs the DNS record pre-created on Cloudflare
+# @meta version 0.0.1
+# @meta require-tools curl
+# @meta require-tools grep
+# @meta require-tools host
+# @meta require-tools jq
+# @flag -f --force Force update.
+# @option -k --api-token! $CF_DNS_API_TOKEN API token.
+# @arg dns-record! DNS record to update.
 
-set -e
+set -euo pipefail
 
-fsource=${BASH_SOURCE[0]}
-while [ -L "$fsource" ]; do # resolve $SOURCE until the file is no longer a symlink
-  fdir=$( cd -P "$( dirname "$fsource" )" >/dev/null 2>&1 && pwd )
-  fdir=$(readlink "$fsource")
-  [[ $fsource != /* ]] && fsource=$fdir/$fsource # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the syml>
-done
-scriptDir=$( cd -P "$( dirname "$fsource" )" >/dev/null 2>&1 && pwd )
+#region Bundler import [utils.mod/io.sh]
 
-OPTSTRING=":k:f"
+# Prints text to stdout.
+#
+# Args:
+#   msg: Message or text to print. Accepts multiple arguments.
+# Outputs:
+#   Prints the provided message to stdout.
+Mbs:Io:print() {
+	printf '%b\n' "$*"
+}
 
-while getopts ${OPTSTRING} opt; do
-  case ${opt} in
-    f)
-      force="true"
-      ;;
-    k)
-      cfApiToken="${OPTARG}"
-      ;;
-    ?)
-      >&2 echo "Invalid option: -$OPTARG"
-      exit 1
-      ;;
-    :)
-      >&2 echo "Option -$OPTARG requires an argument."
-      exit 1
-      ;;
-  esac
-done
+# Prints an error message with an [ERR] prefix.
+#
+# Args:
+#   msg: Error message text to print.
+# Outputs:
+#   Prints the provided message to stdout with an [ERR] prefix.
+Mbs:Io:error() {
+	Mbs:Io:print '[ERR]' "$*"
+}
 
-shift $((OPTIND-1))
+# Prints a warning message with a [WRN] prefix.
+#
+# Args:
+#   msg: Warning message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [WRN] prefix.
+Mbs:Io:warn() {
+	Mbs:Io:print '[WRN]' "$*"
+}
 
-force=${force:-false}
-cfApiToken=${cfApiToken:-$CF_DNS_API_TOKEN}
+# Prints an informational message with an [INF] prefix.
+#
+# Args:
+#   msg: Informational message text to print.
+# Outputs:
+#   Prints the provided message to stdout with an [INF] prefix.
+Mbs:Io:info() {
+	Mbs:Io:print '[INF]' "$*"
+}
 
-if [ -z "$cfApiToken" ]; then
-  >&2 echo "Missing Cloudflare API token."
-  exit 1
-fi
+# Prints a success message with a [SUC] prefix.
+#
+# Args:
+#   msg: Success message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [SUC] prefix.
+Mbs:Io:success() {
+	Mbs:Io:print '[SUC]' "$*"
+}
 
-dnsRecord=$1
-zone="$(echo "$dnsRecord" | sed 's/^[^.]*\.//')"
+# Prints a debug message with a [DBG] prefix.
+#
+# Args:
+#   msg: Success message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [DBG] prefix.
+Mbs:Io:debug() {
+	Mbs:Io:print '[DBG]' "$*"
+}
 
-cfBaseUrl="https://api.cloudflare.com/client/v4"
+# Prints a simple separator line.
+#
+# Outputs:
+#   Prints a separator to stdout.
+Mbs:Io:printSep() {
+	Mbs:Io:print "\n-----------------------------\n"
+}
 
-echo "--- cloudflare-ddns-update (start) ---"
+# Pauses execution until the user presses a key.
+#
+# Outputs:
+#   Prompts the user to press any key and then continues.
+# Returns:
+#   0 after the user presses a key.
+Mbs:Io:paktc() {
+	Mbs:Io:print ""
+	Mbs:Io:print "Press any key to continue"
+	read -n 1 -s -r
+	Mbs:Io:print ""
+}
 
-# Get the current external IP address
-ip=$(curl -s -X GET https://checkip.amazonaws.com)
-echo "Current IP is $ip"
+Mbs:Io:confirm() {
+	local default_choice text_suffix
+	default_choice="$1"
+	[[ $default_choice =~ ^[Yy]$ ]] && text_suffix="[Y/n]" || text_suffix="[y/N]"
 
-if [ "$force" != "true" ]; then
-  if host $dnsRecord 1.1.1.1 | grep "has address" | grep "$ip"; then
-    echo "$dnsRecord is currently set to $ip; no changes needed"
-    exit 0
-  fi
-else
-  echo "Force mode enabled, updating DNS record"
-fi
+	read -r -p "$2 $text_suffix " -n 1
+	echo " "
 
-# if here, the dns record needs updating
-echo "Updating zone $zone, DNS record $dnsRecord"
+	local answer
+	answer="${REPLY:-$default_choice}"
+	[[ $answer =~ ^[Yy]$ ]]
+}
 
-# get the zone id for the requested zone
-zoneId=$(curl -f -s -X GET "${cfBaseUrl}/zones?name=$zone&status=active" \
-  -H "Authorization: Bearer $cfApiToken" \
-  -H "Content-Type: application/json" | jq -r '{"result"}[] | .[0] | .id')
-echo "Zone id for $zone is $zoneId"
+Mbs:Io:confirmDefaultNo() {
+	Mbs:Io:confirm "n" "$1"
+}
 
-# get the dns record id
-dnsRecordId=$(curl -f -s -X GET "${cfBaseUrl}/zones/$zoneId/dns_records?type=A&name=$dnsRecord" \
-  -H "Authorization: Bearer $cfApiToken" \
-  -H "Content-Type: application/json" | jq -r '{"result"}[] | .[0] | .id')
-echo "DNS record id for $dnsRecord is $dnsRecordId"
+Mbs:Io:confirmDefaultYes() {
+	Mbs:Io:confirm "y" "$1"
+}
+#endregion Bundler import [utils.mod/io.sh]
 
-# update the record
-curl -f -s -X PUT "${cfBaseUrl}/zones/$zoneId/dns_records/$dnsRecordId" \
-  -H "Authorization: Bearer $cfApiToken" \
-  -H "Content-Type: application/json" \
-  --data "{\"type\":\"A\",\"name\":\"$dnsRecord\",\"content\":\"$ip\",\"ttl\":1,\"proxied\":false}" | jq
-echo "DNS record updated"
+_entry() {
+	local force cf_api_token dns_record
+	force=${argc_force:-0}
+	cf_api_token=${argc_api_token}
+	dns_record=$argc_dns_record
 
-echo "--- cloudflare-ddns-update (done) ---"
-set +e
+	# FIXME: delete
+	# zone="$(echo "$dns_record" | sed 's/^[^.]*\.//')"
+	zone="${dns_record#*.}"
+
+	cf_base_url="https://api.cloudflare.com/client/v4"
+
+	# Get the current external IP address
+	current_ext_ip=$(curl -s -X GET https://checkip.amazonaws.com)
+	Mbs:Io:print "Current IP is $current_ext_ip"
+
+	if [ "$force" != "1" ]; then
+		if host "$dns_record" 1.1.1.1 | grep "has address" | grep "$current_ext_ip"; then
+			Mbs:Io:print "$dns_record is currently set to $current_ext_ip; no changes needed"
+			exit 0
+		fi
+	else
+		Mbs:Io:print "Force mode enabled, updating DNS record"
+	fi
+
+	# if here, the dns record needs updating
+	Mbs:Io:print "Updating zone $zone, DNS record $dns_record"
+
+	# get the zone id for the requested zone
+	zone_id=$(curl -f -s -X GET "${cf_base_url}/zones?name=$zone&status=active" \
+		-H "Authorization: Bearer $cf_api_token" \
+		-H "Content-Type: application/json" | jq -r '{"result"}[] | .[0] | .id')
+	Mbs:Io:print "Zone id for $zone is $zone_id"
+
+	# get the dns record id
+	dns_record_id=$(curl -f -s -X GET "${cf_base_url}/zones/$zone_id/dns_records?type=A&name=$dns_record" \
+		-H "Authorization: Bearer $cf_api_token" \
+		-H "Content-Type: application/json" | jq -r '{"result"}[] | .[0] | .id')
+	Mbs:Io:print "DNS record id for $dns_record is $dns_record_id"
+
+	# update the record
+	curl -f -s -X PUT "${cf_base_url}/zones/$zone_id/dns_records/$dns_record_id" \
+		-H "Authorization: Bearer $cf_api_token" \
+		-H "Content-Type: application/json" \
+		--data "{\"type\":\"A\",\"name\":\"$dns_record\",\"content\":\"$current_ext_ip\",\"ttl\":1,\"proxied\":false}" | jq
+	Mbs:Io:print "DNS record updated"
+}
+
+# ARGC-BUILD {
+# This block was generated by argc (https://github.com/sigoden/argc).
+# Modifying it manually is not recommended
+
+_argc_run() {
+	if [[ ${1:-} == "___internal___" ]]; then
+		_argc_die "error: unsupported ___internal___ command"
+	fi
+	if [[ ${OS:-} == "Windows_NT" ]] && [[ -n ${MSYSTEM:-} ]]; then
+		set -o igncr
+	fi
+	argc__args=("$(basename "$0" .sh)" "$@")
+	argc__positionals=()
+	_argc_index=1
+	_argc_len="${#argc__args[@]}"
+	_argc_required_flag_options=()
+	_argc_required_envs=()
+	_argc_tools=()
+	_argc_parse
+	_argc_require_params "error: the following required arguments were not provided:" "${_argc_required_flag_options[@]}"
+	_argc_require_tools "${_argc_tools[@]}"
+	if [ -n "${argc__fn:-}" ]; then
+		$argc__fn "${argc__positionals[@]}"
+	fi
+}
+
+_argc_usage() {
+	cat <<-'EOF'
+		A bash script to update a Cloudflare DNS A record with the external IP of the source machine.
+		Needs the DNS record pre-created on Cloudflare
+
+		USAGE: cloudflare-ddns-update.sh.tmp.out [OPTIONS] --api-token <API-TOKEN> <DNS-RECORD>
+
+		ARGS:
+		  <DNS-RECORD>  DNS record to update.
+
+		OPTIONS:
+		  -f, --force                  Force update.
+		  -k, --api-token <API-TOKEN>  API token. [env: CF_DNS_API_TOKEN]
+		  -h, --help                   Print help
+		  -V, --version                Print version
+	EOF
+	exit
+}
+
+_argc_version() {
+	echo cloudflare-ddns-update.sh.tmp.out 0.0.1
+	exit
+}
+
+_argc_parse() {
+	local _argc_key _argc_action
+	local _argc_subcmds=""
+	while [[ $_argc_index -lt $_argc_len ]]; do
+		_argc_item="${argc__args[_argc_index]}"
+		_argc_key="${_argc_item%%=*}"
+		case "$_argc_key" in
+		--help | -help | -h)
+			_argc_usage
+			;;
+		--version | -version | -V)
+			_argc_version
+			;;
+		--)
+			_argc_dash="${#argc__positionals[@]}"
+			argc__positionals+=("${argc__args[@]:$((_argc_index + 1))}")
+			_argc_index=$_argc_len
+			break
+			;;
+		--force | -f)
+			if [[ $_argc_item == *=* ]]; then
+				_argc_die "error: flag \`--force\` don't accept any value"
+			fi
+			_argc_index=$((_argc_index + 1))
+			if [[ -n ${argc_force:-} ]]; then
+				_argc_die 'error: the argument `--force` cannot be used multiple times'
+			else
+				argc_force=1
+			fi
+			;;
+		--api-token | -k)
+			_argc_take_args "--api-token <API-TOKEN>" 1 1 "-" ""
+			_argc_index=$((_argc_index + _argc_take_args_len + 1))
+			if [[ -z ${argc_api_token:-} ]]; then
+				argc_api_token="${_argc_take_args_values[0]:-}"
+			else
+				_argc_die 'error: the argument `--api-token` cannot be used multiple times'
+			fi
+			;;
+		*)
+			if _argc_maybe_flag_option "-" "$_argc_item"; then
+				_argc_die "error: unexpected argument \`$_argc_key\` found"
+			fi
+			argc__positionals+=("$_argc_item")
+			_argc_index=$((_argc_index + 1))
+			;;
+		esac
+	done
+	if [[ -z ${argc_api_token:-} ]] && [[ -n ${CF_DNS_API_TOKEN:-} ]]; then
+		_argc_env_values=("$CF_DNS_API_TOKEN")
+		argc_api_token="${_argc_env_values[0]}"
+	fi
+	_argc_required_flag_options+=('argc_api_token:--api-token <API-TOKEN>')
+	_argc_tools=(curl)
+	if [[ -n ${_argc_action:-} ]]; then
+		$_argc_action
+	else
+		if [[ ${argc__positionals[0]:-} == "help" ]] && [[ ${#argc__positionals[@]} -eq 1 ]]; then
+			_argc_usage
+		fi
+		_argc_match_positionals 0
+		local values_index values_size
+		IFS=: read -r values_index values_size <<<"${_argc_match_positionals_values[0]:-}"
+		if [[ -n $values_index ]]; then
+			argc_dns_record="${argc__positionals[values_index]}"
+		else
+			_argc_die 'error: the required environments `<DNS-RECORD>` were not provided'
+		fi
+	fi
+}
+
+_argc_take_args() {
+	_argc_take_args_values=()
+	_argc_take_args_len=0
+	local param="$1" min="$2" max="$3" signs="$4" delimiter="$5"
+	if [[ $min -eq 0 ]] && [[ $max -eq 0 ]]; then
+		return
+	fi
+	local _argc_take_index=$((_argc_index + 1)) _argc_take_value
+	if [[ $_argc_item == *=* ]]; then
+		_argc_take_args_values=("${_argc_item##*=}")
+	else
+		while [[ $_argc_take_index -lt $_argc_len ]]; do
+			_argc_take_value="${argc__args[_argc_take_index]}"
+			if _argc_maybe_flag_option "$signs" "$_argc_take_value"; then
+				if [[ ${#_argc_take_value} -gt 1 ]]; then
+					break
+				fi
+			fi
+			_argc_take_args_values+=("$_argc_take_value")
+			_argc_take_args_len=$((_argc_take_args_len + 1))
+			if [[ $_argc_take_args_len -ge $max ]]; then
+				break
+			fi
+			_argc_take_index=$((_argc_take_index + 1))
+		done
+	fi
+	if [[ ${#_argc_take_args_values[@]} -lt $min ]]; then
+		_argc_die "error: incorrect number of values for \`$param\`"
+	fi
+	if [[ -n $delimiter ]] && [[ ${#_argc_take_args_values[@]} -gt 0 ]]; then
+		local item values arr=()
+		for item in "${_argc_take_args_values[@]}"; do
+			IFS="$delimiter" read -r -a values <<<"$item"
+			arr+=("${values[@]}")
+		done
+		_argc_take_args_values=("${arr[@]}")
+	fi
+}
+
+_argc_match_positionals() {
+	_argc_match_positionals_values=()
+	_argc_match_positionals_len=0
+	local params=("$@")
+	local args_len="${#argc__positionals[@]}"
+	if [[ $args_len -eq 0 ]]; then
+		return
+	fi
+	local params_len=$# arg_index=0 param_index=0
+	while [[ $param_index -lt $params_len && $arg_index -lt $args_len ]]; do
+		local takes=0
+		if [[ ${params[param_index]} -eq 1 ]]; then
+			if [[ $param_index -eq 0 ]] \
+				&& [[ ${_argc_dash:-} -gt 0 ]] \
+				&& [[ $params_len -eq 2 ]] \
+				&& [[ ${params[$((param_index + 1))]} -eq 1 ]] \
+				; then
+				takes=${_argc_dash:-}
+			else
+				local arg_diff=$((args_len - arg_index)) param_diff=$((params_len - param_index))
+				if [[ $arg_diff -gt $param_diff ]]; then
+					takes=$((arg_diff - param_diff + 1))
+				else
+					takes=1
+				fi
+			fi
+		else
+			takes=1
+		fi
+		_argc_match_positionals_values+=("$arg_index:$takes")
+		arg_index=$((arg_index + takes))
+		param_index=$((param_index + 1))
+	done
+	if [[ $arg_index -lt $args_len ]]; then
+		_argc_match_positionals_values+=("$arg_index:$((args_len - arg_index))")
+	fi
+	_argc_match_positionals_len=${#_argc_match_positionals_values[@]}
+	if [[ $params_len -gt 0 ]] && [[ $_argc_match_positionals_len -gt $params_len ]]; then
+		local index="${_argc_match_positionals_values[params_len]%%:*}"
+		_argc_die "error: unexpected argument \`${argc__positionals[index]}\` found"
+	fi
+}
+
+_argc_maybe_flag_option() {
+	local signs="$1" arg="$2"
+	if [[ -z $signs ]]; then
+		return 1
+	fi
+	local cond=false
+	if [[ $signs == *"+"* ]]; then
+		if [[ $arg =~ ^\+[^+].* ]]; then
+			cond=true
+		fi
+	elif [[ $arg == -* ]]; then
+		if ((${#arg} < 3)) || [[ ! $arg =~ ^---.* ]]; then
+			cond=true
+		fi
+	fi
+	if [[ $cond == "false" ]]; then
+		return 1
+	fi
+	local value="${arg%%=*}"
+	if [[ $value =~ [[:space:]] ]]; then
+		return 1
+	fi
+	return 0
+}
+
+_argc_require_params() {
+	local message="$1" missed_envs="" item name render_name
+	for item in "${@:2}"; do
+		name="${item%%:*}"
+		render_name="${item##*:}"
+		if [[ -z ${!name:-} ]]; then
+			missed_envs="$missed_envs"$'\n'"  $render_name"
+		fi
+	done
+	if [[ -n ${missed_envs} ]]; then
+		_argc_die "$message$missed_envs"
+	fi
+}
+
+_argc_require_tools() {
+	local tool missing_tools=()
+	for tool in "$@"; do
+		if ! command -v "$tool" >/dev/null 2>&1; then
+			missing_tools+=("$tool")
+		fi
+	done
+	if [[ ${#missing_tools[@]} -gt 0 ]]; then
+		echo "error: missing tools: ${missing_tools[*]}" >&2
+		exit 1
+	fi
+}
+
+_argc_die() {
+	if [[ $# -eq 0 ]]; then
+		cat
+	else
+		echo "$*" >&2
+	fi
+	exit 1
+}
+
+_argc_run "$@"
+
+# ARGC-BUILD }
+
+_entry

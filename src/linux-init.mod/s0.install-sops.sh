@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
-LinuxInitMod:installSops() {
-    IO:print "Installing sops"
+# !mbs meta require-tools curl
+
+Mbs:LinuxInit:installSops() {
+    Mbs:Io:print "Installing sops"
 
     local sops_version
     local pc_arch
@@ -14,7 +16,7 @@ LinuxInitMod:installSops() {
         pc_arch=arm64
         ;;
     *)
-        IO:alert "Unsupported architecture: $(uname -m)"
+        Mbs:Io:error "Unsupported architecture: $(uname -m)"
         return 1
         ;;
     esac
@@ -22,7 +24,7 @@ LinuxInitMod:installSops() {
     # Get latest SOPS version from GitHub releases
     sops_version=$(curl -fsSL https://api.github.com/repos/getsops/sops/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+')
     if [ -z "$sops_version" ]; then
-        IO:alert "Unable to detect latest sops version"
+        Mbs:Io:error "Unable to detect latest sops version"
         return 1
     fi
 

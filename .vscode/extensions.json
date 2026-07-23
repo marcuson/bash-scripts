@@ -1,0 +1,11 @@
+{
+	"recommendations": [
+		"mads-hartmann.bash-ide-vscode",
+		"foxundermoon.shell-format",
+		"formulahendry.code-runner",
+		"jeff-hykin.better-shellscript-syntax",
+		"rogalmic.bash-debug",
+		"rpinski.shebang-snippets",
+		"timonwong.shellcheck"
+	]
+}

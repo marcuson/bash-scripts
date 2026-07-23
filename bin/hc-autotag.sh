@@ -1,102 +1,495 @@
 #!/usr/bin/env bash
 
-set -e
+# @describe Autotag Healthchecks pings based on name
+# @meta version 0.0.1
+# @meta require-tools curl
+# @meta require-tools jq
+# @option -u --url! $HC_BASE_URL Healthchecks base URL.
+# @option -k --api-key! $HC_API_KEY API key.
 
-fsource=${BASH_SOURCE[0]}
-while [ -L "$fsource" ]; do # resolve $SOURCE until the file is no longer a symlink
-  fdir=$( cd -P "$( dirname "$fsource" )" >/dev/null 2>&1 && pwd )
-  fdir=$(readlink "$fsource")
-  [[ $fsource != /* ]] && fsource=$fdir/$fsource # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the syml>
-done
-scriptDir=$( cd -P "$( dirname "$fsource" )" >/dev/null 2>&1 && pwd )
+set -euo pipefail
 
-OPTSTRING=":u:k:"
+#region Bundler import [utils.mod/io.sh]
 
-while getopts ${OPTSTRING} opt; do
-  case ${opt} in
-    u)
-      hcBaseUrl="${OPTARG}"
-      ;;
-    k)
-      apiKey="${OPTARG}"
-      ;;
-    ?)
-      >&2 echo "Invalid option: -$OPTARG"
-      exit 1
-      ;;
-    :)
-      >&2 echo "Option -$OPTARG requires an argument."
-      exit 1
-      ;;
-  esac
-done
+# Prints text to stdout.
+#
+# Args:
+#   msg: Message or text to print. Accepts multiple arguments.
+# Outputs:
+#   Prints the provided message to stdout.
+Mbs:Io:print() {
+	printf '%b\n' "$*"
+}
 
-shift $((OPTIND-1))
+# Prints an error message with an [ERR] prefix.
+#
+# Args:
+#   msg: Error message text to print.
+# Outputs:
+#   Prints the provided message to stdout with an [ERR] prefix.
+Mbs:Io:error() {
+	Mbs:Io:print '[ERR]' "$*"
+}
 
-hcBaseUrl=${hcBaseUrl:-$HC_BASE_URL}
-apiKey=${apiKey:-$HC_API_KEY}
+# Prints a warning message with a [WRN] prefix.
+#
+# Args:
+#   msg: Warning message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [WRN] prefix.
+Mbs:Io:warn() {
+	Mbs:Io:print '[WRN]' "$*"
+}
 
-if [ -z "$hcBaseUrl" ]; then
-  >&2 echo "Missing HC base URL (-u or HC_BASE_URL)."
-  exit 1
-fi
+# Prints an informational message with an [INF] prefix.
+#
+# Args:
+#   msg: Informational message text to print.
+# Outputs:
+#   Prints the provided message to stdout with an [INF] prefix.
+Mbs:Io:info() {
+	Mbs:Io:print '[INF]' "$*"
+}
 
-if [ -z "$apiKey" ]; then
-  >&2 echo "Missing HC API token (-k or HC_API_KEY)."
-  exit 1
-fi
+# Prints a success message with a [SUC] prefix.
+#
+# Args:
+#   msg: Success message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [SUC] prefix.
+Mbs:Io:success() {
+	Mbs:Io:print '[SUC]' "$*"
+}
 
-echo "--- hc-autotag (start) ---"
+# Prints a debug message with a [DBG] prefix.
+#
+# Args:
+#   msg: Success message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [DBG] prefix.
+Mbs:Io:debug() {
+	Mbs:Io:print '[DBG]' "$*"
+}
 
-# 1. Get all checks from the API
-echo "Fetching all checks from the v3 API..."
-checksJson=$(curl -s -H "X-Api-Key: $apiKey" "$hcBaseUrl/api/v3/checks/")
+# Prints a simple separator line.
+#
+# Outputs:
+#   Prints a separator to stdout.
+Mbs:Io:printSep() {
+	Mbs:Io:print "\n-----------------------------\n"
+}
 
-# Check if the API call was successful
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to fetch checks from the API. Please check your network connection."
-    exit 1
-fi
+# Pauses execution until the user presses a key.
+#
+# Outputs:
+#   Prompts the user to press any key and then continues.
+# Returns:
+#   0 after the user presses a key.
+Mbs:Io:paktc() {
+	Mbs:Io:print ""
+	Mbs:Io:print "Press any key to continue"
+	read -n 1 -s -r
+	Mbs:Io:print ""
+}
 
-# Check for an empty response
-if [ -z "$checksJson" ]; then
-    echo "Error: Empty response from the API. Please check your API key and the API endpoint."
-    exit 1
-fi
+Mbs:Io:confirm() {
+	local default_choice text_suffix
+	default_choice="$1"
+	[[ $default_choice =~ ^[Yy]$ ]] && text_suffix="[Y/n]" || text_suffix="[y/N]"
 
-# 2. Process each check using jq
-echo "Processing checks and updating tags..."
-echo "$checksJson" | jq -c '.checks[]' | while read -r check; do
-    # Extract the slug and the uuid for the check
-    slug=$(echo "$check" | jq -r '.slug')
-    check_uuid=$(echo "$check" | jq -r '.uuid')
+	read -r -p "$2 $text_suffix " -n 1
+	echo " "
 
-    if [ -z "$slug" ] || [ "$slug" == "null" ]; then
-        echo "Skipping a check because its slug is empty."
-        continue
-    fi
+	local answer
+	answer="${REPLY:-$default_choice}"
+	[[ $answer =~ ^[Yy]$ ]]
+}
 
-    # 3. Split the slug and get the first part
-    new_tag=$(echo "$slug" | cut -d'-' -f1)
+Mbs:Io:confirmDefaultNo() {
+	Mbs:Io:confirm "n" "$1"
+}
 
-    if [ -z "$new_tag" ]; then
-        echo "Could not determine a new tag for check with slug: $slug"
-        continue
-    fi
+Mbs:Io:confirmDefaultYes() {
+	Mbs:Io:confirm "y" "$1"
+}
+#endregion Bundler import [utils.mod/io.sh]
+#region Bundler import [utils.mod/script.sh]
 
-    echo "  - Check with slug '$slug' will be tagged with: '$new_tag'"
+# Registers a trap handler for a signal.
+#
+# Args:
+#   cmd: Command or snippet to run when the trap fires.
+#   sig: Signal name or numeric value. Defaults to EXIT.
+# Returns:
+#   0 if the trap was registered successfully.
+#   1 if the signal is invalid.
+Mbs:Script:addTrap() {
+	local cmd=$1         # command(s) to add
+	local sig=${2:-EXIT} # signal name or number
 
-    # 4. Assign the new tag to the check
-    update_payload="{\"tags\": \"$new_tag\"}"
-    update_response=$(curl -s -X POST -H "X-Api-Key: $apiKey" -H "Content-Type: application/json" -d "$update_payload" "${hcBaseUrl}/api/v3/checks/${check_uuid}")
+	# validate signal name or numeric id
+	local sig_name
+	{
+		if [[ $sig =~ ^[0-9]+$ ]]; then
+			sig_name=$(kill -l "$sig")
+		else
+			sig_name=${sig^^}
+			kill -l "$sig_name" &>/dev/null
+		fi
+	} || {
+		echo "add_trap: invalid signal '$sig'" >&2
+		return 1
+	}
 
+	# Compute effective trap list for current (sub)shell
+	# Based on info from https://stackoverflow.com/a/59307894/5116073
+	local old
+	if [[ ${BASH_VERSINFO:-0} -ge 4 ]]; then
+		trap -- KILL &>/dev/null || true
+		old=$(trap -p "$sig_name")
+	else
+		old=$(trap -p "$sig_name")
+	fi
 
-    if [ $? -eq 0 ]; then
-        echo "    ... Successfully updated."
-    else
-        echo "    ... Failed to update."
-    fi
-done
+	# extract/cleanup the existing registered command(s)
+	old=${old#*\'}         # remove leading "trap -- '"
+	old=${old%\'*}         # remove trailing "' EXIT"
+	old=${old//"'\''"/"'"} # unescape every '\'' to '
 
-echo "--- hc-autotag (done) ---"
-set +e
+	# if command is already registered, do nothing
+	if [[ ";$old;" == *";$cmd;"* ]]; then
+		return 0
+	fi
+
+	# build the new combined handler
+	if [[ -n $old ]]; then
+		combined="$old;$cmd"
+	else
+		combined="$cmd"
+	fi
+
+	# register the new combined handler
+	trap -- "$combined" "$sig"
+}
+
+Mbs:Script:addTrapMultiSignal() {
+	local cmd="${1:-}"
+	shift || true
+
+	# Validate that at least command and one signal are provided
+	if [[ -z $cmd || $# -eq 0 ]]; then
+		echo "Usage: Mbs:Script:addTrapMultiSignal <command> <signal1> [signal2 ...]" >&2
+		return 1
+	fi
+
+	local sig
+	for sig in "$@"; do
+		Mbs:Script:addTrap "$cmd" "$sig" || return 1
+	done
+}
+
+# Prints the current call stack.
+#
+# Outputs:
+#   Prints each caller and line number to stdout.
+Mbs:Script:callStack() {
+	local i=1
+	while caller $i; do
+		((i++))
+	done
+}
+
+# Check whether a given name resolves to a shell function.
+#
+# Args:
+#   $1: Name of the function to inspect.
+# Returns:
+#   0 if the name resolves to a function.
+#   1 otherwise.
+Mbs:Script:isFunc() {
+	local res
+	res=$(type -t "$1" || echo "NONE")
+
+	if [ "$res" == "function" ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+Mbs:Script:die() {
+	Mbs:Io:error "$@"
+
+	# FIXME: Unregister traps
+	exit 1
+}
+#endregion Bundler import [utils.mod/script.sh]
+
+_entry() {
+	hc_base_url=${argc_url}
+	api_key=${argc_api_key}
+
+	# 1. Get all checks from the API
+	Mbs:Io:print "Fetching all checks from the v3 API..."
+	checks_json=$(curl -s -H "X-Api-Key: $api_key" "$hc_base_url/api/v3/checks/")
+
+	# Check if the API call was successful
+	if [ ! $? ]; then
+		Mbs:Script:die "Failed to fetch checks from the API. Please check your network connection."
+	fi
+
+	# Check for an empty response
+	if [ -z "$checks_json" ]; then
+		Mbs:Script:die "Empty response from the API. Please check your API key and the API endpoint."
+	fi
+
+	# 2. Process each check using jq
+	Mbs:Io:print "Processing checks and updating tags..."
+	echo "$checks_json" | jq -c '.checks[]' | while read -r check; do
+		# Extract the slug and the uuid for the check
+		slug=$(echo "$check" | jq -r '.slug')
+		check_uuid=$(echo "$check" | jq -r '.uuid')
+
+		if [ -z "$slug" ] || [ "$slug" == "null" ]; then
+			Mbs:Io:warn "Skipping a check because its slug is empty."
+			continue
+		fi
+
+		# 3. Split the slug and get the first part
+		new_tag=$(echo "$slug" | cut -d'-' -f1)
+
+		if [ -z "$new_tag" ]; then
+			Mbs:Io:warn "Could not determine a new tag for check with slug: $slug"
+			continue
+		fi
+
+		Mbs:Io:print "Check with slug '$slug' will be tagged with: '$new_tag'"
+
+		# 4. Assign the new tag to the check
+		update_payload="{\"tags\": \"$new_tag\"}"
+		curl -s -X POST -H "X-Api-Key: $api_key" -H "Content-Type: application/json" -d "$update_payload" "${hc_base_url}/api/v3/checks/${check_uuid}"
+
+		if [ ! $? ]; then
+			Mbs:Io:print "Successfully updated check with slug '$slug'."
+		else
+			Mbs:Io:error "Failed to update check with slug '$slug'."
+		fi
+	done
+}
+
+# ARGC-BUILD {
+# This block was generated by argc (https://github.com/sigoden/argc).
+# Modifying it manually is not recommended
+
+_argc_run() {
+	if [[ ${1:-} == "___internal___" ]]; then
+		_argc_die "error: unsupported ___internal___ command"
+	fi
+	if [[ ${OS:-} == "Windows_NT" ]] && [[ -n ${MSYSTEM:-} ]]; then
+		set -o igncr
+	fi
+	argc__args=("$(basename "$0" .sh)" "$@")
+	argc__positionals=()
+	_argc_index=1
+	_argc_len="${#argc__args[@]}"
+	_argc_required_flag_options=()
+	_argc_required_envs=()
+	_argc_tools=()
+	_argc_parse
+	_argc_require_params "error: the following required arguments were not provided:" "${_argc_required_flag_options[@]}"
+	_argc_require_tools "${_argc_tools[@]}"
+	if [ -n "${argc__fn:-}" ]; then
+		$argc__fn "${argc__positionals[@]}"
+	fi
+}
+
+_argc_usage() {
+	cat <<-'EOF'
+		Autotag Healthchecks pings based on name
+
+		USAGE: hc-autotag.sh.tmp.out --url <URL> --api-key <API-KEY>
+
+		OPTIONS:
+		  -u, --url <URL>          Healthchecks base URL. [env: HC_BASE_URL]
+		  -k, --api-key <API-KEY>  API key. [env: HC_API_KEY]
+		  -h, --help               Print help
+		  -V, --version            Print version
+	EOF
+	exit
+}
+
+_argc_version() {
+	echo hc-autotag.sh.tmp.out 0.0.1
+	exit
+}
+
+_argc_parse() {
+	local _argc_key _argc_action
+	local _argc_subcmds=""
+	while [[ $_argc_index -lt $_argc_len ]]; do
+		_argc_item="${argc__args[_argc_index]}"
+		_argc_key="${_argc_item%%=*}"
+		case "$_argc_key" in
+		--help | -help | -h)
+			_argc_usage
+			;;
+		--version | -version | -V)
+			_argc_version
+			;;
+		--)
+			_argc_dash="${#argc__positionals[@]}"
+			argc__positionals+=("${argc__args[@]:$((_argc_index + 1))}")
+			_argc_index=$_argc_len
+			break
+			;;
+		--url | -u)
+			_argc_take_args "--url <URL>" 1 1 "-" ""
+			_argc_index=$((_argc_index + _argc_take_args_len + 1))
+			if [[ -z ${argc_url:-} ]]; then
+				argc_url="${_argc_take_args_values[0]:-}"
+			else
+				_argc_die 'error: the argument `--url` cannot be used multiple times'
+			fi
+			;;
+		--api-key | -k)
+			_argc_take_args "--api-key <API-KEY>" 1 1 "-" ""
+			_argc_index=$((_argc_index + _argc_take_args_len + 1))
+			if [[ -z ${argc_api_key:-} ]]; then
+				argc_api_key="${_argc_take_args_values[0]:-}"
+			else
+				_argc_die 'error: the argument `--api-key` cannot be used multiple times'
+			fi
+			;;
+		*)
+			if _argc_maybe_flag_option "-" "$_argc_item"; then
+				_argc_die "error: unexpected argument \`$_argc_key\` found"
+			fi
+			argc__positionals+=("$_argc_item")
+			_argc_index=$((_argc_index + 1))
+			;;
+		esac
+	done
+	if [[ -z ${argc_url:-} ]] && [[ -n ${HC_BASE_URL:-} ]]; then
+		_argc_env_values=("$HC_BASE_URL")
+		argc_url="${_argc_env_values[0]}"
+	fi
+	if [[ -z ${argc_api_key:-} ]] && [[ -n ${HC_API_KEY:-} ]]; then
+		_argc_env_values=("$HC_API_KEY")
+		argc_api_key="${_argc_env_values[0]}"
+	fi
+	_argc_required_flag_options+=('argc_url:--url <URL>' 'argc_api_key:--api-key <API-KEY>')
+	_argc_tools=(curl)
+	if [[ -n ${_argc_action:-} ]]; then
+		$_argc_action
+	else
+		if [[ ${argc__positionals[0]:-} == "help" ]] && [[ ${#argc__positionals[@]} -eq 1 ]]; then
+			_argc_usage
+		fi
+	fi
+}
+
+_argc_take_args() {
+	_argc_take_args_values=()
+	_argc_take_args_len=0
+	local param="$1" min="$2" max="$3" signs="$4" delimiter="$5"
+	if [[ $min -eq 0 ]] && [[ $max -eq 0 ]]; then
+		return
+	fi
+	local _argc_take_index=$((_argc_index + 1)) _argc_take_value
+	if [[ $_argc_item == *=* ]]; then
+		_argc_take_args_values=("${_argc_item##*=}")
+	else
+		while [[ $_argc_take_index -lt $_argc_len ]]; do
+			_argc_take_value="${argc__args[_argc_take_index]}"
+			if _argc_maybe_flag_option "$signs" "$_argc_take_value"; then
+				if [[ ${#_argc_take_value} -gt 1 ]]; then
+					break
+				fi
+			fi
+			_argc_take_args_values+=("$_argc_take_value")
+			_argc_take_args_len=$((_argc_take_args_len + 1))
+			if [[ $_argc_take_args_len -ge $max ]]; then
+				break
+			fi
+			_argc_take_index=$((_argc_take_index + 1))
+		done
+	fi
+	if [[ ${#_argc_take_args_values[@]} -lt $min ]]; then
+		_argc_die "error: incorrect number of values for \`$param\`"
+	fi
+	if [[ -n $delimiter ]] && [[ ${#_argc_take_args_values[@]} -gt 0 ]]; then
+		local item values arr=()
+		for item in "${_argc_take_args_values[@]}"; do
+			IFS="$delimiter" read -r -a values <<<"$item"
+			arr+=("${values[@]}")
+		done
+		_argc_take_args_values=("${arr[@]}")
+	fi
+}
+
+_argc_maybe_flag_option() {
+	local signs="$1" arg="$2"
+	if [[ -z $signs ]]; then
+		return 1
+	fi
+	local cond=false
+	if [[ $signs == *"+"* ]]; then
+		if [[ $arg =~ ^\+[^+].* ]]; then
+			cond=true
+		fi
+	elif [[ $arg == -* ]]; then
+		if ((${#arg} < 3)) || [[ ! $arg =~ ^---.* ]]; then
+			cond=true
+		fi
+	fi
+	if [[ $cond == "false" ]]; then
+		return 1
+	fi
+	local value="${arg%%=*}"
+	if [[ $value =~ [[:space:]] ]]; then
+		return 1
+	fi
+	return 0
+}
+
+_argc_require_params() {
+	local message="$1" missed_envs="" item name render_name
+	for item in "${@:2}"; do
+		name="${item%%:*}"
+		render_name="${item##*:}"
+		if [[ -z ${!name:-} ]]; then
+			missed_envs="$missed_envs"$'\n'"  $render_name"
+		fi
+	done
+	if [[ -n ${missed_envs} ]]; then
+		_argc_die "$message$missed_envs"
+	fi
+}
+
+_argc_require_tools() {
+	local tool missing_tools=()
+	for tool in "$@"; do
+		if ! command -v "$tool" >/dev/null 2>&1; then
+			missing_tools+=("$tool")
+		fi
+	done
+	if [[ ${#missing_tools[@]} -gt 0 ]]; then
+		echo "error: missing tools: ${missing_tools[*]}" >&2
+		exit 1
+	fi
+}
+
+_argc_die() {
+	if [[ $# -eq 0 ]]; then
+		cat
+	else
+		echo "$*" >&2
+	fi
+	exit 1
+}
+
+_argc_run "$@"
+
+# ARGC-BUILD }
+
+_entry

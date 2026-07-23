@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 
-LinuxInitMod:installOhMyPosh() {
-	IO:print "Installing oh-my-posh"
+Mbs:LinuxInit:installOhMyPosh() {
+	Mbs:Io:print "Installing oh-my-posh"
 
-	if ! LinuxInitMod:isNormalUser "$LI__USER"; then
-		IO:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+	if ! Mbs:User:isNormal "$LI__USER"; then
+		Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
 	fi
 
 	sudo -u "$LI__USER" bash -c "curl -s https://ohmyposh.dev/install.sh | bash -s"
 
-	if LinuxInitMod:isVarEmpty "$home_user_d"; then
+	if Mbs:Var:isEmpty "$home_user_d"; then
 		home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
 	fi
 
@@ -32,9 +32,9 @@ if [ -n "\$DISPLAY" ] || [ -n "\$WAYLAND_DISPLAY" ] || [ "\$TERM" = "xterm-256co
 fi
 EOF
 
-		IO:print "oh-my-posh installed"
+		Mbs:Io:print "oh-my-posh installed"
 	else
-		IO:print "$profile_user_f already configured"
+		Mbs:Io:print "$profile_user_f already configured"
 	fi
 
 	return 0

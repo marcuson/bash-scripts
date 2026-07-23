@@ -1,1200 +1,515 @@
 #!/usr/bin/env bash
-### ==============================================================================
-### SO HOW DO YOU PROCEED WITH YOUR SCRIPT?
-### 1. define the flags/options/parameters and defaults you need in Option:config()
-### 2. implement the different verbs in Script:main() directly or with helper functions do_action1
-### 3. implement helper functions you defined in previous step
-### ==============================================================================
-###
-### FOR LLMs: QUICK REFERENCE
-### -------------------------
-### ADDING NEW VERBS: In Option:config(), add verb to the choice line (e.g., "action1,action2,newverb")
-###                   then add a case block in Script:main(): newverb) do_newverb ;;
-###
-### OPTIONS/FLAGS become variables:
-###   flag|f|FORCE|...        => $FORCE (0 or 1)
-###   option|o|output|...|x   => $output (default "x")
-###   param|1|input|...       => $input (required positional arg)
-###
-### ENV FILES: Automatically loaded in order (later files override earlier):
-###   1. <script_folder>/.env
-###   2. <script_folder>/.<script_prefix>.env
-###   3. <script_folder>/<script_prefix>.env
-###   4. ./.env (current dir, if different from script folder)
-###   5. ./.<script_prefix>.env
-###   6. ./<script_prefix>.env
-###
-### Os:require "binary" ["package"] - check if binary exists, die if not
-###   Os:require "awk"                      => check for awk, suggest: brew install awk
-###   Os:require "convert" "imagemagick"    => check for convert, suggest: brew install imagemagick
-###   Os:require "prog" "pip install prog"  => check for prog, suggest: pip install prog
-###   With -f/--FORCE flag: auto-installs missing binaries instead of dying
-###
-### IO FUNCTIONS and effect of --QUIET (-Q) and --VERBOSE (-V):
-###   IO:print "msg"   : normal output (stdout)     - hidden by -Q
-###   IO:debug "msg"   : debug info (stderr)        - only shown with -V
-###   IO:success "msg" : success message (stdout)   - hidden by -Q
-###   IO:announce "msg": announcement + 1s pause    - hidden by -Q
-###   IO:alert "msg"   : warning message (stderr)   - always shown
-###   IO:die "msg"     : error message + exit       - always shown
-###   IO:progress "msg": overwriting progress line  - hidden by -Q
-###   IO:log "msg"     : append to $log_file        - not affected by -Q/-V
-###   IO:confirm "?"   : ask y/N question           - skipped (=yes) with -f/--FORCE
-###
-### STRING FUNCTIONS:
-###   Str:trim "  text  "                => "text" (remove leading/trailing whitespace)
-###   Str:lower "HELLO"                  => "hello"
-###   Str:upper "hello"                  => "HELLO"
-###   Str:ascii "café"                   => "cafe" (remove diacritics)
-###   Str:slugify "Hello World!"         => "hello-world" (URL-safe)
-###   Str:slugify "Hello World!" "_"     => "hello_world" (custom separator)
-###   Str:title "hello world"            => "HelloWorld"
-###   Str:title "hello world" "_"        => "Hello_World"
-###   Str:digest 8 <<< "text"            => "d3b07384" (MD5 hash, first N chars)
-### ==============================================================================
 
-### Created by Leonardo Marcucci ( marcuson ) on 2026-02-20
-### Based on https://github.com/pforret/bashew 1.22.1
-script_version="0.0.1" # if there is a VERSION.md in this script's folder, that will have priority over this version number
-readonly script_author="marcuson.nn90@gmail.com"
-readonly script_created="2026-02-20"
-readonly run_as_root=-1 # run_as_root: 0 = don't check anything / 1 = script MUST run as root / -1 = script MAY NOT run as root
-readonly script_description="Automatically add INBOX tag to untagged Mealie recipes"
+# @describe Encrypt/decrypt a file using a password and GPG.
+# @meta version 0.0.1
+# @meta require-tools curl
+# @meta require-tools jq
+# @option -u --url! Mealie base URL.
+# @option -k --api-key! API key.
 
-function Option:config() {
-  ### SYNTAX: type|short|long|description[|default][|choices]
-  ###
-  ### flag   => -x or --xxxx sets $xxxx=1 (default: 0)
-  ### option => -x <val> or --xxxx <val> sets $xxxx=val
-  ### list   => -x <v1> -x <v2> sets ${xxxx[@]} array
-  ### param  => positional arg: 1=required, ?=optional, n=multiple
-  ### choice => positional arg with validation against allowed values
-  ###
-  ### Examples:
-  ###   flag|v|VERBOSE|show debug info          => $VERBOSE (0/1)
-  ###   option|o|output|output file|out.txt     => $output (default: out.txt)
-  ###   list|t|tag|add tags                     => ${tag[@]}
-  ###   param|1|input|input file                => $input (required)
-  ###   param|?|extra|optional arg              => $extra (optional)
-  ###   choice|1|action|verb|run,test,build     => $action (validated)
-  grep <<<"
-#commented lines will be filtered
-flag|h|help|show usage
-flag|Q|QUIET|no output
-flag|V|VERBOSE|also show debug messages
-flag|f|FORCE|do not ask for confirmation (always yes)
-option|L|LOG_DIR|folder for log files |$HOME/log/$script_prefix
-option|T|TMP_DIR|folder for temp files|/tmp/$script_prefix
-choice|1|action|action to perform|run,check,env,update
-# run options
-option|u|url|mealie url
-option|k|apikey|mealie api key
-" -v -e '^#' -e '^\s*$'
+set -euo pipefail
+
+#region Bundler import [utils.mod/io.sh]
+
+# Prints text to stdout.
+#
+# Args:
+#   msg: Message or text to print. Accepts multiple arguments.
+# Outputs:
+#   Prints the provided message to stdout.
+Mbs:Io:print() {
+	printf '%b\n' "$*"
 }
 
-#####################################################################
-## Put your Script:main script here
-#####################################################################
-
-function Script:main() {
-  ## TO ADD A NEW VERB: 1) add it to choice line in Option:config()
-  ##                    2) add a case block below: myverb) do_myverb ;;
-  ##                    3) implement do_myverb() function
-  IO:log "[$script_basename] $script_version started"
-
-  Os:require "awk"
-
-  case "${action,,}" in # ${action,,} = lowercase $action
-  run)
-    #TIP: use «$script_prefix run to run the tagger
-    #TIP:> $script_prefix run
-    do_run
-    ;;
-
-  check | env)
-    ## leave this default action, it will make it easier to test your script
-    #TIP: use «$script_prefix check» to check if this script is ready to execute and what values the options/flags are
-    #TIP:> $script_prefix check
-    #TIP: use «$script_prefix env» to generate an example .env file
-    #TIP:> $script_prefix env > .env
-    Script:check
-    ;;
-
-  update)
-    ## leave this default action, it will make it easier to test your script
-    #TIP: use «$script_prefix update» to update to the latest version
-    #TIP:> $script_prefix update
-    Script:git_pull
-    ;;
-
-  *)
-    IO:die "action [$action] not recognized"
-    ;;
-  esac
-  IO:log "[$script_basename] ended after $SECONDS secs"
-  #TIP: >>> bash script created with «pforret/bashew»
-  #TIP: >>> for bash development, also check out «pforret/setver» and «pforret/progressbar»
+# Prints an error message with an [ERR] prefix.
+#
+# Args:
+#   msg: Error message text to print.
+# Outputs:
+#   Prints the provided message to stdout with an [ERR] prefix.
+Mbs:Io:error() {
+	Mbs:Io:print '[ERR]' "$*"
 }
 
-#####################################################################
-## Put your helper scripts here
-## Available variables: all flags/options from Option:config()
-## Useful functions: IO:print, IO:debug, IO:die, IO:success, IO:confirm
-##                   Os:require "binary" [install_cmd], Os:tempfile [ext]
-#####################################################################
-
-function do_run() {
-  IO:log "run"
-  # Os:require examples: (1 arg = binary name, 2 args = binary + package/command)
-  # Os:require "ffmpeg"                                  # => brew install ffmpeg
-  # Os:require "convert" "imagemagick"                   # => brew install imagemagick
-  # Os:require "progressbar" "basher install pforret/progressbar"
-  # (code)
-
-  Os:require "curl"
-  Os:require "jq"
-  local mealie_url="${url%/}"
-  local mealie_api_key="$apikey"
-
-  if [[ "$mealie_url" == "" ]]; then
-    IO:die "Mealie URL is required, set it with -u or --url"
-  fi
-
-  if [[ "$mealie_api_key" == "" ]]; then
-    IO:die "Mealie API key is required, set it with -k or --apikey"
-  fi
-
-  local api_base_url="${mealie_url}/api"
-  local auth_header="Authorization: Bearer ${mealie_api_key}"
-  local inbox_tag_name="INBOX"
-
-  IO:print "Checking if tag '$inbox_tag_name' exists..."
-
-  # 1. Get or Create the target tag to obtain its full object (id, name, slug)
-  local tag_list=$(curl -s -H "$auth_header" "${api_base_url}/organizers/tags?perPage=1000")
-  local tag_obj=$(echo "$tag_list" | jq -c ".items[] | select(.name == \"$inbox_tag_name\")")
-
-  if [ -z "$tag_obj" ]; then
-    IO:print "Tag not found. Creating tag '$inbox_tag_name'..."
-    tag_obj=$(curl -s -X 'POST' \
-      -H "$auth_header" \
-      -H 'Content-Type: application/json' \
-      -d "{\"name\": \"$inbox_tag_name\"}" \
-      "${api_base_url}/organizers/tags")
-
-    # If creation failed (e.g., due to Mealie v1.x group requirements)
-    if echo "$tag_obj" | jq -e '.detail' >/dev/null; then
-      IO:die "Error creating tag: $(echo "$tag_obj" | jq -r '.detail')"
-    fi
-  fi
-
-  local tag_id=$(echo "$tag_obj" | jq -r '.id')
-  IO:print "Using Tag ID: $tag_id"
-
-  # 2. Fetch recipes and find those with no tags
-  IO:print "Fetching all untagged recipes..."
-  # Note: perPage=1000 is used to avoid complex pagination logic for most home libraries
-  local recipes_json=$(curl -s --fail-with-body -H "$auth_header" "${api_base_url}/recipes?perPage=1000&queryFilter=tags.name%20IS%20null")
-
-  # Filter for IDs of recipes where the 'tags' array is empty
-  local untagged_slugs=$(echo "$recipes_json" | jq -r '.items[] | select(.tags | length == 0) | .slug')
-
-  if [ -z "$untagged_slugs" ]; then
-    IO:print "No untagged recipes found."
-    return
-  fi
-
-  # Count how many we found
-  local untagged_count=$(echo "$untagged_slugs" | wc -l)
-  IO:print "Found $untagged_count untagged recipes. Applying tag..."
-
-  # 3. Perform Bulk Tag Action
-  # Convert IDs into a JSON array
-  local untagged_slugs_array=$(echo "$untagged_slugs" | jq -R . | jq -s -c .)
-
-  # Mealie Bulk Action Body
-  # Note: Newer Mealie versions may require the full tag object inside the array
-  local bulk_payload=$(jq -n \
-    --argjson recipes "$untagged_slugs_array" \
-    --argjson tag "[$tag_obj]" \
-    '{recipes: $recipes, tags: $tag}')
-
-  local api_response_code=$(curl -o /dev/null -w "%{http_code}\n" -s -X 'POST' \
-    -H "$auth_header" \
-    -H 'Content-Type: application/json' \
-    -d "$bulk_payload" \
-    "${api_base_url}/recipes/bulk-actions/tag")
-
-  if [[ $api_response_code == "200" ]]; then
-    IO:print "Successfully assigned '$inbox_tag_name' to $untagged_count recipes."
-  else
-    IO:die "HTTP status code from server: $api_response_code"
-  fi
+# Prints a warning message with a [WRN] prefix.
+#
+# Args:
+#   msg: Warning message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [WRN] prefix.
+Mbs:Io:warn() {
+	Mbs:Io:print '[WRN]' "$*"
 }
 
-#####################################################################
-################### DO NOT MODIFY BELOW THIS LINE ###################
-#####################################################################
-
-action=""
-error_prefix=""
-git_repo_remote=""
-git_repo_root=""
-install_package=""
-os_kernel=""
-os_machine=""
-os_name=""
-os_version=""
-script_basename=""
-script_hash="?"
-script_lines="?"
-script_prefix=""
-shell_brand=""
-shell_version=""
-temp_files=()
-
-# set strict mode -  via http://redsymbol.net/articles/unofficial-bash-strict-mode/
-# removed -e because it made basic [[ testing ]] difficult
-set -uo pipefail
-IFS=$'\n\t'
-FORCE=0
-help=0
-
-#to enable VERBOSE even before option parsing
-VERBOSE=0
-[[ $# -gt 0 ]] && [[ $1 == "-v" ]] && VERBOSE=1
-
-#to enable QUIET even before option parsing
-QUIET=0
-[[ $# -gt 0 ]] && [[ $1 == "-q" ]] && QUIET=1
-
-txtReset=""
-txtError=""
-txtInfo=""
-txtInfo=""
-txtWarn=""
-txtBold=""
-txtItalic=""
-txtUnderline=""
-
-char_succes="OK "
-char_fail="!! "
-char_alert="?? "
-char_wait="..."
-info_icon="(i)"
-config_icon="[c]"
-clean_icon="[c]"
-require_icon="[r]"
-
-### stdIO:print/stderr output
-function IO:initialize() {
-  script_started_at="$(Tool:time)"
-  IO:debug "script $script_basename started at $script_started_at"
-
-  [[ "${BASH_SOURCE[0]:-}" != "${0}" ]] && sourced=1 || sourced=0
-  [[ -t 1 ]] && piped=0 || piped=1 # detect if output is piped
-  if [[ $piped -eq 0 && -n "$TERM" ]]; then
-    txtReset=$(tput sgr0)
-    txtError=$(tput setaf 160)
-    txtInfo=$(tput setaf 2)
-    txtWarn=$(tput setaf 214)
-    txtBold=$(tput bold)
-    txtItalic=$(tput sitm)
-    txtUnderline=$(tput smul)
-  fi
-
-  [[ $(echo -e '\xe2\x82\xac') == '€' ]] && unicode=1 || unicode=0 # detect if unicode is supported
-  if [[ $unicode -gt 0 ]]; then
-    char_succes="✅"
-    char_fail="⛔"
-    char_alert="✴️"
-    char_wait="⏳"
-    info_icon="🌼"
-    config_icon="🌱"
-    clean_icon="🧽"
-    require_icon="🔌"
-  fi
-  error_prefix="${txtError}>${txtReset}"
+# Prints an informational message with an [INF] prefix.
+#
+# Args:
+#   msg: Informational message text to print.
+# Outputs:
+#   Prints the provided message to stdout with an [INF] prefix.
+Mbs:Io:info() {
+	Mbs:Io:print '[INF]' "$*"
 }
 
-function IO:print() {
-  ((QUIET)) && true || printf '%b\n' "$*"
+# Prints a success message with a [SUC] prefix.
+#
+# Args:
+#   msg: Success message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [SUC] prefix.
+Mbs:Io:success() {
+	Mbs:Io:print '[SUC]' "$*"
 }
 
-function IO:debug() {
-  ((VERBOSE)) && IO:print "${txtInfo}# $* ${txtReset}" >&2
-  true
+# Prints a debug message with a [DBG] prefix.
+#
+# Args:
+#   msg: Success message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [DBG] prefix.
+Mbs:Io:debug() {
+	Mbs:Io:print '[DBG]' "$*"
 }
 
-function IO:die() {
-  IO:print "${txtError}${char_fail} $script_basename${txtReset}: $*" >&2
-  Os:beep
-  Script:exit
+# Prints a simple separator line.
+#
+# Outputs:
+#   Prints a separator to stdout.
+Mbs:Io:printSep() {
+	Mbs:Io:print "\n-----------------------------\n"
 }
 
-function IO:alert() {
-  IO:print "${txtWarn}${char_alert}${txtReset}: ${txtUnderline}$*${txtReset}" >&2
+# Pauses execution until the user presses a key.
+#
+# Outputs:
+#   Prompts the user to press any key and then continues.
+# Returns:
+#   0 after the user presses a key.
+Mbs:Io:paktc() {
+	Mbs:Io:print ""
+	Mbs:Io:print "Press any key to continue"
+	read -n 1 -s -r
+	Mbs:Io:print ""
 }
 
-function IO:success() {
-  IO:print "${txtInfo}${char_succes}${txtReset}  ${txtBold}$*${txtReset}"
+Mbs:Io:confirm() {
+	local default_choice text_suffix
+	default_choice="$1"
+	[[ $default_choice =~ ^[Yy]$ ]] && text_suffix="[Y/n]" || text_suffix="[y/N]"
+
+	read -r -p "$2 $text_suffix " -n 1
+	echo " "
+
+	local answer
+	answer="${REPLY:-$default_choice}"
+	[[ $answer =~ ^[Yy]$ ]]
 }
 
-function IO:announce() {
-  IO:print "${txtInfo}${char_wait}${txtReset}  ${txtItalic}$*${txtReset}"
-  sleep 1
+Mbs:Io:confirmDefaultNo() {
+	Mbs:Io:confirm "n" "$1"
 }
 
-function IO:progress() {
-  ((QUIET)) || (
-    local screen_width
-    screen_width=$(tput cols 2>/dev/null || echo 80)
-    local rest_of_line
-    rest_of_line=$((screen_width - 5))
+Mbs:Io:confirmDefaultYes() {
+	Mbs:Io:confirm "y" "$1"
+}
+#endregion Bundler import [utils.mod/io.sh]
+#region Bundler import [utils.mod/script.sh]
 
-    if ((piped)); then
-      IO:print "... $*" >&2
-    else
-      printf "... %-${rest_of_line}b\r" "$*                                             " >&2
-    fi
-  )
+# Registers a trap handler for a signal.
+#
+# Args:
+#   cmd: Command or snippet to run when the trap fires.
+#   sig: Signal name or numeric value. Defaults to EXIT.
+# Returns:
+#   0 if the trap was registered successfully.
+#   1 if the signal is invalid.
+Mbs:Script:addTrap() {
+	local cmd=$1         # command(s) to add
+	local sig=${2:-EXIT} # signal name or number
+
+	# validate signal name or numeric id
+	local sig_name
+	{
+		if [[ $sig =~ ^[0-9]+$ ]]; then
+			sig_name=$(kill -l "$sig")
+		else
+			sig_name=${sig^^}
+			kill -l "$sig_name" &>/dev/null
+		fi
+	} || {
+		echo "add_trap: invalid signal '$sig'" >&2
+		return 1
+	}
+
+	# Compute effective trap list for current (sub)shell
+	# Based on info from https://stackoverflow.com/a/59307894/5116073
+	local old
+	if [[ ${BASH_VERSINFO:-0} -ge 4 ]]; then
+		trap -- KILL &>/dev/null || true
+		old=$(trap -p "$sig_name")
+	else
+		old=$(trap -p "$sig_name")
+	fi
+
+	# extract/cleanup the existing registered command(s)
+	old=${old#*\'}         # remove leading "trap -- '"
+	old=${old%\'*}         # remove trailing "' EXIT"
+	old=${old//"'\''"/"'"} # unescape every '\'' to '
+
+	# if command is already registered, do nothing
+	if [[ ";$old;" == *";$cmd;"* ]]; then
+		return 0
+	fi
+
+	# build the new combined handler
+	if [[ -n $old ]]; then
+		combined="$old;$cmd"
+	else
+		combined="$cmd"
+	fi
+
+	# register the new combined handler
+	trap -- "$combined" "$sig"
 }
 
-function IO:countdown() {
-  local seconds=${1:-5}
-  local message=${2:-Countdown :}
-  local i
+Mbs:Script:addTrapMultiSignal() {
+	local cmd="${1:-}"
+	shift || true
 
-  if ((piped)); then
-    IO:print "$message $seconds seconds"
-  else
-    for ((i = 0; i < "$seconds"; i++)); do
-      IO:progress "${txtInfo}$message $((seconds - i)) seconds${txtReset}"
-      sleep 1
-    done
-    IO:print "                         "
-  fi
+	# Validate that at least command and one signal are provided
+	if [[ -z $cmd || $# -eq 0 ]]; then
+		echo "Usage: Mbs:Script:addTrapMultiSignal <command> <signal1> [signal2 ...]" >&2
+		return 1
+	fi
+
+	local sig
+	for sig in "$@"; do
+		Mbs:Script:addTrap "$cmd" "$sig" || return 1
+	done
 }
 
-### interactive
-function IO:confirm() {
-  ((FORCE)) && return 0
-  read -r -p "$1 [y/N] " -n 1
-  echo " "
-  [[ $REPLY =~ ^[Yy]$ ]]
+# Prints the current call stack.
+#
+# Outputs:
+#   Prints each caller and line number to stdout.
+Mbs:Script:callStack() {
+	local i=1
+	while caller $i; do
+		((i++))
+	done
 }
 
-function IO:question() {
-  local ANSWER
-  local DEFAULT=${2:-}
-  read -r -p "$1 ($DEFAULT) > " ANSWER
-  [[ -z "$ANSWER" ]] && echo "$DEFAULT" || echo "$ANSWER"
+# Check whether a given name resolves to a shell function.
+#
+# Args:
+#   $1: Name of the function to inspect.
+# Returns:
+#   0 if the name resolves to a function.
+#   1 otherwise.
+Mbs:Script:isFunc() {
+	local res
+	res=$(type -t "$1" || echo "NONE")
+
+	if [ "$res" == "function" ]; then
+		return 0
+	else
+		return 1
+	fi
 }
 
-function IO:log() {
-  [[ -n "${log_file:-}" ]] && echo "$(date '+%H:%M:%S') | $*" >>"$log_file"
+Mbs:Script:die() {
+	Mbs:Io:error "$@"
+
+	# FIXME: Unregister traps
+	exit 1
+}
+#endregion Bundler import [utils.mod/script.sh]
+
+_entry() {
+	local mealie_url="${argc_url%/}"
+	local mealie_api_key="$argc_api_key"
+
+	local api_base_url="${mealie_url}/api"
+	local auth_header="Authorization: Bearer ${mealie_api_key}"
+	local inbox_tag_name="INBOX"
+
+	Mbs:Io:print "Checking if tag '$inbox_tag_name' exists..."
+
+	# 1. Get or Create the target tag to obtain its full object (id, name, slug)
+	local tag_list tag_obj
+	tag_list=$(curl -s -H "$auth_header" "${api_base_url}/organizers/tags?perPage=1000")
+	tag_obj=$(echo "$tag_list" | jq -c ".items[] | select(.name == \"$inbox_tag_name\")")
+
+	if [ -z "$tag_obj" ]; then
+		Mbs:Io:print "Tag not found. Creating tag '$inbox_tag_name'..."
+		tag_obj=$(curl -s -X 'POST' \
+			-H "$auth_header" \
+			-H 'Content-Type: application/json' \
+			-d "{\"name\": \"$inbox_tag_name\"}" \
+			"${api_base_url}/organizers/tags")
+
+		# If creation failed (e.g., due to Mealie v1.x group requirements)
+		if echo "$tag_obj" | jq -e '.detail' >/dev/null; then
+			Mbs:Script:die "Error creating tag: $(echo "$tag_obj" | jq -r '.detail')"
+		fi
+	fi
+
+	local tag_id
+	tag_id=$(echo "$tag_obj" | jq -r '.id')
+	Mbs:Io:print "Using Tag ID: $tag_id"
+
+	# 2. Fetch recipes and find those with no tags
+	Mbs:Io:print "Fetching all untagged recipes..."
+	# Note: perPage=1000 is used to avoid complex pagination logic for most home libraries
+	local recipes_json
+	recipes_json=$(curl -s --fail-with-body -H "$auth_header" "${api_base_url}/recipes?perPage=1000&queryFilter=tags.name%20IS%20null")
+
+	# Filter for IDs of recipes where the 'tags' array is empty
+	local untagged_slugs
+	untagged_slugs=$(echo "$recipes_json" | jq -r '.items[] | select(.tags | length == 0) | .slug')
+
+	if [ -z "$untagged_slugs" ]; then
+		Mbs:Io:print "No untagged recipes found."
+		return 0
+	fi
+
+	# Count how many we found
+	local untagged_count
+	untagged_count=$(echo "$untagged_slugs" | wc -l)
+	Mbs:Io:print "Found $untagged_count untagged recipes. Applying tag..."
+
+	# 3. Perform Bulk Tag Action
+	# Convert IDs into a JSON array
+	local untagged_slugs_array
+	untagged_slugs_array=$(echo "$untagged_slugs" | jq -R . | jq -s -c .)
+
+	# Mealie Bulk Action Body
+	# Note: Newer Mealie versions may require the full tag object inside the array
+	local bulk_payload
+	bulk_payload=$(jq -n \
+		--argjson recipes "$untagged_slugs_array" \
+		--argjson tag "[$tag_obj]" \
+		'{recipes: $recipes, tags: $tag}')
+
+	local api_response_code
+	api_response_code=$(curl -o /dev/null -w "%{http_code}\n" -s -X 'POST' \
+		-H "$auth_header" \
+		-H 'Content-Type: application/json' \
+		-d "$bulk_payload" \
+		"${api_base_url}/recipes/bulk-actions/tag")
+
+	if [[ $api_response_code == "200" ]]; then
+		Mbs:Io:print "Successfully assigned '$inbox_tag_name' to $untagged_count recipes."
+	else
+		Mbs:Script:die "HTTP status code from server: $api_response_code"
+	fi
 }
 
-function Tool:calc() {
-  awk "BEGIN {print $*} ; "
+# ARGC-BUILD {
+# This block was generated by argc (https://github.com/sigoden/argc).
+# Modifying it manually is not recommended
+
+_argc_run() {
+	if [[ ${1:-} == "___internal___" ]]; then
+		_argc_die "error: unsupported ___internal___ command"
+	fi
+	if [[ ${OS:-} == "Windows_NT" ]] && [[ -n ${MSYSTEM:-} ]]; then
+		set -o igncr
+	fi
+	argc__args=("$(basename "$0" .sh)" "$@")
+	argc__positionals=()
+	_argc_index=1
+	_argc_len="${#argc__args[@]}"
+	_argc_required_flag_options=()
+	_argc_required_envs=()
+	_argc_tools=()
+	_argc_parse
+	_argc_require_params "error: the following required arguments were not provided:" "${_argc_required_flag_options[@]}"
+	_argc_require_tools "${_argc_tools[@]}"
+	if [ -n "${argc__fn:-}" ]; then
+		$argc__fn "${argc__positionals[@]}"
+	fi
 }
 
-function Tool:round() {
-  local number="${1}"
-  local decimals="${2:-0}"
+_argc_usage() {
+	cat <<-'EOF'
+		Encrypt/decrypt a file using a password and GPG.
 
-  awk "BEGIN {print sprintf( \"%.${decimals}f\" , $number )};"
+		USAGE: mealietag.sh.tmp.out --url <URL> --api-key <API-KEY>
+
+		OPTIONS:
+		  -u, --url <URL>          Mealie base URL.
+		  -k, --api-key <API-KEY>  API key.
+		  -h, --help               Print help
+		  -V, --version            Print version
+	EOF
+	exit
 }
 
-function Tool:time() {
-  if [[ $(command -v perl) ]]; then
-    perl -MTime::HiRes=time -e 'printf "%f\n", time'
-  elif [[ $(command -v php) ]]; then
-    php -r 'printf("%f\n",microtime(true));'
-  elif [[ $(command -v python) ]]; then
-    python -c 'import time; print(time.time()) '
-  elif [[ $(command -v python3) ]]; then
-    python3 -c 'import time; print(time.time()) '
-  elif [[ $(command -v node) ]]; then
-    node -e 'console.log(+new Date() / 1000)'
-  elif [[ $(command -v ruby) ]]; then
-    ruby -e 'STDOUT.puts(Time.now.to_f)'
-  else
-    date '+%s.000'
-  fi
+_argc_version() {
+	echo mealietag.sh.tmp.out 0.0.1
+	exit
 }
 
-function Tool:throughput() {
-  local time_started="$1"
-  [[ -z "$time_started" ]] && time_started="$script_started_at"
-  local operations="${2:-1}"
-  local name="${3:-operation}"
-
-  local time_finished
-  local duration
-  local seconds
-  time_finished="$(Tool:time)"
-  duration="$(Tool:calc "$time_finished - $time_started")"
-  seconds="$(Tool:round "$duration")"
-  local ops
-  if [[ "$operations" -gt 1 ]]; then
-    if [[ $operations -gt $seconds ]]; then
-      ops=$(Tool:calc "$operations / $duration")
-      ops=$(Tool:round "$ops" 3)
-      duration=$(Tool:round "$duration" 2)
-      IO:print "$operations $name finished in $duration secs: $ops $name/sec"
-    else
-      ops=$(Tool:calc "$duration / $operations")
-      ops=$(Tool:round "$ops" 3)
-      duration=$(Tool:round "$duration" 2)
-      IO:print "$operations $name finished in $duration secs: $ops sec/$name"
-    fi
-  else
-    duration=$(Tool:round "$duration" 2)
-    IO:print "$name finished in $duration secs"
-  fi
+_argc_parse() {
+	local _argc_key _argc_action
+	local _argc_subcmds=""
+	while [[ $_argc_index -lt $_argc_len ]]; do
+		_argc_item="${argc__args[_argc_index]}"
+		_argc_key="${_argc_item%%=*}"
+		case "$_argc_key" in
+		--help | -help | -h)
+			_argc_usage
+			;;
+		--version | -version | -V)
+			_argc_version
+			;;
+		--)
+			_argc_dash="${#argc__positionals[@]}"
+			argc__positionals+=("${argc__args[@]:$((_argc_index + 1))}")
+			_argc_index=$_argc_len
+			break
+			;;
+		--url | -u)
+			_argc_take_args "--url <URL>" 1 1 "-" ""
+			_argc_index=$((_argc_index + _argc_take_args_len + 1))
+			if [[ -z ${argc_url:-} ]]; then
+				argc_url="${_argc_take_args_values[0]:-}"
+			else
+				_argc_die 'error: the argument `--url` cannot be used multiple times'
+			fi
+			;;
+		--api-key | -k)
+			_argc_take_args "--api-key <API-KEY>" 1 1 "-" ""
+			_argc_index=$((_argc_index + _argc_take_args_len + 1))
+			if [[ -z ${argc_api_key:-} ]]; then
+				argc_api_key="${_argc_take_args_values[0]:-}"
+			else
+				_argc_die 'error: the argument `--api-key` cannot be used multiple times'
+			fi
+			;;
+		*)
+			if _argc_maybe_flag_option "-" "$_argc_item"; then
+				_argc_die "error: unexpected argument \`$_argc_key\` found"
+			fi
+			argc__positionals+=("$_argc_item")
+			_argc_index=$((_argc_index + 1))
+			;;
+		esac
+	done
+	_argc_required_flag_options+=('argc_url:--url <URL>' 'argc_api_key:--api-key <API-KEY>')
+	_argc_tools=(curl)
+	if [[ -n ${_argc_action:-} ]]; then
+		$_argc_action
+	else
+		if [[ ${argc__positionals[0]:-} == "help" ]] && [[ ${#argc__positionals[@]} -eq 1 ]]; then
+			_argc_usage
+		fi
+	fi
 }
 
-### string processing
-
-function Str:trim() {
-  local var="$*"
-  # remove leading whitespace characters
-  var="${var#"${var%%[![:space:]]*}"}"
-  # remove trailing whitespace characters
-  var="${var%"${var##*[![:space:]]}"}"
-  printf '%s' "$var"
+_argc_take_args() {
+	_argc_take_args_values=()
+	_argc_take_args_len=0
+	local param="$1" min="$2" max="$3" signs="$4" delimiter="$5"
+	if [[ $min -eq 0 ]] && [[ $max -eq 0 ]]; then
+		return
+	fi
+	local _argc_take_index=$((_argc_index + 1)) _argc_take_value
+	if [[ $_argc_item == *=* ]]; then
+		_argc_take_args_values=("${_argc_item##*=}")
+	else
+		while [[ $_argc_take_index -lt $_argc_len ]]; do
+			_argc_take_value="${argc__args[_argc_take_index]}"
+			if _argc_maybe_flag_option "$signs" "$_argc_take_value"; then
+				if [[ ${#_argc_take_value} -gt 1 ]]; then
+					break
+				fi
+			fi
+			_argc_take_args_values+=("$_argc_take_value")
+			_argc_take_args_len=$((_argc_take_args_len + 1))
+			if [[ $_argc_take_args_len -ge $max ]]; then
+				break
+			fi
+			_argc_take_index=$((_argc_take_index + 1))
+		done
+	fi
+	if [[ ${#_argc_take_args_values[@]} -lt $min ]]; then
+		_argc_die "error: incorrect number of values for \`$param\`"
+	fi
+	if [[ -n $delimiter ]] && [[ ${#_argc_take_args_values[@]} -gt 0 ]]; then
+		local item values arr=()
+		for item in "${_argc_take_args_values[@]}"; do
+			IFS="$delimiter" read -r -a values <<<"$item"
+			arr+=("${values[@]}")
+		done
+		_argc_take_args_values=("${arr[@]}")
+	fi
 }
 
-function Str:lower() {
-  if [[ -n "$1" ]]; then
-    local input="$*"
-    echo "${input,,}"
-  else
-    awk '{print tolower($0)}'
-  fi
+_argc_maybe_flag_option() {
+	local signs="$1" arg="$2"
+	if [[ -z $signs ]]; then
+		return 1
+	fi
+	local cond=false
+	if [[ $signs == *"+"* ]]; then
+		if [[ $arg =~ ^\+[^+].* ]]; then
+			cond=true
+		fi
+	elif [[ $arg == -* ]]; then
+		if ((${#arg} < 3)) || [[ ! $arg =~ ^---.* ]]; then
+			cond=true
+		fi
+	fi
+	if [[ $cond == "false" ]]; then
+		return 1
+	fi
+	local value="${arg%%=*}"
+	if [[ $value =~ [[:space:]] ]]; then
+		return 1
+	fi
+	return 0
 }
 
-function Str:upper() {
-  if [[ -n "$1" ]]; then
-    local input="$*"
-    echo "${input^^}"
-  else
-    awk '{print toupper($0)}'
-  fi
+_argc_require_params() {
+	local message="$1" missed_envs="" item name render_name
+	for item in "${@:2}"; do
+		name="${item%%:*}"
+		render_name="${item##*:}"
+		if [[ -z ${!name:-} ]]; then
+			missed_envs="$missed_envs"$'\n'"  $render_name"
+		fi
+	done
+	if [[ -n ${missed_envs} ]]; then
+		_argc_die "$message$missed_envs"
+	fi
 }
 
-function Str:ascii() {
-  # remove all characters with accents/diacritics to latin alphabet
-  # shellcheck disable=SC2020
-  sed 'y/àáâäæãåāǎçćčèéêëēėęěîïííīįìǐłñńôöòóœøōǒõßśšûüǔùǖǘǚǜúūÿžźżÀÁÂÄÆÃÅĀǍÇĆČÈÉÊËĒĖĘĚÎÏÍÍĪĮÌǏŁÑŃÔÖÒÓŒØŌǑÕẞŚŠÛÜǓÙǕǗǙǛÚŪŸŽŹŻ/aaaaaaaaaccceeeeeeeeiiiiiiiilnnooooooooosssuuuuuuuuuuyzzzAAAAAAAAACCCEEEEEEEEIIIIIIIILNNOOOOOOOOOSSSUUUUUUUUUUYZZZ/'
+_argc_require_tools() {
+	local tool missing_tools=()
+	for tool in "$@"; do
+		if ! command -v "$tool" >/dev/null 2>&1; then
+			missing_tools+=("$tool")
+		fi
+	done
+	if [[ ${#missing_tools[@]} -gt 0 ]]; then
+		echo "error: missing tools: ${missing_tools[*]}" >&2
+		exit 1
+	fi
 }
 
-function Str:slugify() {
-  # Str:slugify <input> <separator>
-  # Str:slugify "Jack, Jill & Clémence LTD"      => jack-jill-clemence-ltd
-  # Str:slugify "Jack, Jill & Clémence LTD" "_"  => jack_jill_clemence_ltd
-  separator="${2:-}"
-  [[ -z "$separator" ]] && separator="-"
-  Str:lower "$1" |
-    Str:ascii |
-    awk '{
-          gsub(/[\[\]@#$%^&*;,.:()<>!?\/+=_]/," ",$0);
-          gsub(/^  */,"",$0);
-          gsub(/  *$/,"",$0);
-          gsub(/  */,"-",$0);
-          gsub(/[^a-z0-9\-]/,"");
-          print;
-          }' |
-    sed "s/-/$separator/g"
+_argc_die() {
+	if [[ $# -eq 0 ]]; then
+		cat
+	else
+		echo "$*" >&2
+	fi
+	exit 1
 }
 
-function Str:title() {
-  # Str:title <input> <separator>
-  # Str:title "Jack, Jill & Clémence LTD"     => JackJillClemenceLtd
-  # Str:title "Jack, Jill & Clémence LTD" "_" => Jack_Jill_Clemence_Ltd
-  separator="${2:-}"
-  # shellcheck disable=SC2020
-  Str:lower "$1" |
-    tr 'àáâäæãåāçćčèéêëēėęîïííīįìłñńôöòóœøōõßśšûüùúūÿžźż' 'aaaaaaaaccceeeeeeeiiiiiiilnnoooooooosssuuuuuyzzz' |
-    awk '{ gsub(/[\[\]@#$%^&*;,.:()<>!?\/+=_-]/," ",$0); print $0; }' |
-    awk '{
-          for (i=1; i<=NF; ++i) {
-              $i = toupper(substr($i,1,1)) tolower(substr($i,2))
-          };
-          print $0;
-          }' |
-    sed "s/ /$separator/g" |
-    cut -c1-50
-}
+_argc_run "$@"
 
-function Str:digest() {
-  local length=${1:-6}
-  if [[ -n $(command -v md5sum) ]]; then
-    # regular linux
-    md5sum | cut -c1-"$length"
-  else
-    # macos
-    md5 | cut -c1-"$length"
-  fi
-}
+# ARGC-BUILD }
 
-# Gha: function should only be run inside of a Github Action
-
-function Gha:finish() {
-  [[ -z "${RUNNER_OS:-}" ]] && IO:die "This should only run inside a Github Action, don't run it on your machine"
-  local timestamp message
-  git config user.name "Bashew Runner"
-  git config user.email "actions@users.noreply.github.com"
-  git add -A
-  timestamp="$(date -u)"
-  message="$timestamp < $script_basename $script_version"
-  IO:print "Commit Message: $message"
-  git commit -m "${message}" || exit 0
-  git pull --rebase
-  git push
-  IO:success "Commit OK!"
-}
-
-trap "IO:die \"ERROR \$? after \$SECONDS seconds \n\
-\${error_prefix} last command : '\$BASH_COMMAND' \" \
-\$(< \$script_install_path awk -v lineno=\$LINENO \
-'NR == lineno {print \"\${error_prefix} from line \" lineno \" : \" \$0}')" INT TERM EXIT
-# cf https://askubuntu.com/questions/513932/what-is-the-bash-command-variable-good-for
-
-Script:exit() {
-  local temp_file
-  for temp_file in "${temp_files[@]-}"; do
-    [[ -f "$temp_file" ]] && (
-      IO:debug "Delete temp file [$temp_file]"
-      rm -f "$temp_file"
-    )
-  done
-  trap - INT TERM EXIT
-  IO:debug "$script_basename finished after $SECONDS seconds"
-  exit 0
-}
-
-Script:check_version() {
-  (
-    # shellcheck disable=SC2164
-    pushd "$script_install_folder" &>/dev/null
-    if [[ -d .git ]]; then
-      local remote
-      remote="$(git remote -v | grep fetch | awk 'NR == 1 {print $2}')"
-      IO:progress "Check for updates - $remote"
-      git remote update &>/dev/null
-      if [[ $(git rev-list --count "HEAD...HEAD@{upstream}" 2>/dev/null) -gt 0 ]]; then
-        IO:print "There is a more recent update of this script - run <<$script_prefix update>> to update"
-      else
-        IO:progress "                                         "
-      fi
-    fi
-    # shellcheck disable=SC2164
-    popd &>/dev/null
-  )
-}
-
-Script:git_pull() {
-  # run in background to avoid problems with modifying a running interpreted script
-  (
-    sleep 1
-    cd "$script_install_folder" && git pull
-  ) &
-}
-
-Script:show_tips() {
-  ((sourced)) && return 0
-  # shellcheck disable=SC2016
-  grep <"${BASH_SOURCE[0]}" -v '$0' |
-    awk \
-      -v green="$txtInfo" \
-      -v yellow="$txtWarn" \
-      -v reset="$txtReset" \
-      '
-      /TIP: /  {$1=""; gsub(/«/,green); gsub(/»/,reset); print "*" $0}
-      /TIP:> / {$1=""; print " " yellow $0 reset}
-      ' |
-    awk \
-      -v script_basename="$script_basename" \
-      -v script_prefix="$script_prefix" \
-      '{
-      gsub(/\$script_basename/,script_basename);
-      gsub(/\$script_prefix/,script_prefix);
-      print ;
-      }'
-}
-
-Script:check() {
-  local name
-  if [[ -n $(Option:filter flag) ]]; then
-    IO:print "## ${txtInfo}boolean flags${txtReset}:"
-    Option:filter flag |
-      grep -v help |
-      while read -r name; do
-        declare -p "$name" | cut -d' ' -f3-
-      done
-  fi
-
-  if [[ -n $(Option:filter option) ]]; then
-    IO:print "## ${txtInfo}option defaults${txtReset}:"
-    Option:filter option |
-      while read -r name; do
-        declare -p "$name" | cut -d' ' -f3-
-      done
-  fi
-
-  if [[ -n $(Option:filter list) ]]; then
-    IO:print "## ${txtInfo}list options${txtReset}:"
-    Option:filter list |
-      while read -r name; do
-        declare -p "$name" | cut -d' ' -f3-
-      done
-  fi
-
-  if [[ -n $(Option:filter param) ]]; then
-    if ((piped)); then
-      IO:debug "Skip parameters for .env files"
-    else
-      IO:print "## ${txtInfo}parameters${txtReset}:"
-      Option:filter param |
-        while read -r name; do
-          declare -p "$name" | cut -d' ' -f3-
-        done
-    fi
-  fi
-
-  if [[ -n $(Option:filter choice) ]]; then
-    if ((piped)); then
-      IO:debug "Skip choices for .env files"
-    else
-      IO:print "## ${txtInfo}choice${txtReset}:"
-      Option:filter choice |
-        while read -r name; do
-          declare -p "$name" | cut -d' ' -f3-
-        done
-    fi
-  fi
-
-  IO:print "## ${txtInfo}required commands${txtReset}:"
-  Script:show_required
-}
-
-Option:usage() {
-  IO:print "Program : ${txtInfo}$script_basename${txtReset}  by ${txtWarn}$script_author${txtReset}"
-  IO:print "Version : ${txtInfo}v$script_version${txtReset} (${txtWarn}$script_modified${txtReset})"
-  IO:print "Purpose : ${txtInfo}$script_description${txtReset}"
-  echo -n "Usage   : $script_basename"
-  Option:config |
-    awk '
-  BEGIN { FS="|"; OFS=" "; oneline="" ; fulltext="Flags, options and parameters:"}
-  $1 ~ /flag/  {
-    fulltext = fulltext sprintf("\n    -%1s|--%-12s: [flag] %s [default: off]",$2,$3,$4) ;
-    oneline  = oneline " [-" $2 "]"
-    }
-  $1 ~ /option/  {
-    fulltext = fulltext sprintf("\n    -%1s|--%-12s: [option] %s",$2,$3 " <?>",$4) ;
-    if($5!=""){fulltext = fulltext "  [default: " $5 "]"; }
-    oneline  = oneline " [-" $2 " <" $3 ">]"
-    }
-  $1 ~ /list/  {
-    fulltext = fulltext sprintf("\n    -%1s|--%-12s: [list] %s (array)",$2,$3 " <?>",$4) ;
-    fulltext = fulltext "  [default empty]";
-    oneline  = oneline " [-" $2 " <" $3 ">]"
-    }
-  $1 ~ /secret/  {
-    fulltext = fulltext sprintf("\n    -%1s|--%s <%s>: [secret] %s",$2,$3,"?",$4) ;
-      oneline  = oneline " [-" $2 " <" $3 ">]"
-    }
-  $1 ~ /param/ {
-    if($2 == "1"){
-          fulltext = fulltext sprintf("\n    %-17s: [parameter] %s","<"$3">",$4);
-          oneline  = oneline " <" $3 ">"
-     }
-     if($2 == "?"){
-          fulltext = fulltext sprintf("\n    %-17s: [parameter] %s (optional)","<"$3">",$4);
-          oneline  = oneline " <" $3 "?>"
-     }
-     if($2 == "n"){
-          fulltext = fulltext sprintf("\n    %-17s: [parameters] %s (1 or more)","<"$3">",$4);
-          oneline  = oneline " <" $3 " …>"
-     }
-    }
-  $1 ~ /choice/ {
-        fulltext = fulltext sprintf("\n    %-17s: [choice] %s","<"$3">",$4);
-        if($5!=""){fulltext = fulltext "  [options: " $5 "]"; }
-        oneline  = oneline " <" $3 ">"
-    }
-    END {print oneline; print fulltext}
-  '
-}
-
-function Option:filter() {
-  Option:config | grep "$1|" | cut -d'|' -f3 | sort | grep -v '^\s*$'
-}
-
-function Script:show_required() {
-  grep 'Os:require' "$script_install_path" |
-    grep -v -E '\(\)|grep|# Os:require' |
-    awk -v install="# $install_package " '
-    function ltrim(s) { sub(/^[ "\t\r\n]+/, "", s); return s }
-    function rtrim(s) { sub(/[ "\t\r\n]+$/, "", s); return s }
-    function trim(s) { return rtrim(ltrim(s)); }
-    NF == 2 {print install trim($2); }
-    NF == 3 {print install trim($3); }
-    NF > 3  {$1=""; $2=""; $0=trim($0); print "# " trim($0);}
-  ' |
-    sort -u
-}
-
-function Option:initialize() {
-  local init_command
-  init_command=$(Option:config |
-    grep -v "VERBOSE|" |
-    awk '
-    BEGIN { FS="|"; OFS=" ";}
-    $1 ~ /flag/   && $5 == "" {print $3 "=0; "}
-    $1 ~ /flag/   && $5 != "" {print $3 "=\"" $5 "\"; "}
-    $1 ~ /option/ && $5 == "" {print $3 "=\"\"; "}
-    $1 ~ /option/ && $5 != "" {print $3 "=\"" $5 "\"; "}
-    $1 ~ /choice/   {print $3 "=\"\"; "}
-    $1 ~ /list/     {print $3 "=(); "}
-    $1 ~ /secret/   {print $3 "=\"\"; "}
-    ')
-  if [[ -n "$init_command" ]]; then
-    eval "$init_command"
-  fi
-}
-
-function Option:has_single() { Option:config | grep 'param|1|' >/dev/null; }
-function Option:has_choice() { Option:config | grep 'choice|1' >/dev/null; }
-function Option:has_optional() { Option:config | grep 'param|?|' >/dev/null; }
-function Option:has_multi() { Option:config | grep 'param|n|' >/dev/null; }
-
-function Option:parse() {
-  if [[ $# -eq 0 ]]; then
-    Option:usage >&2
-    Script:exit
-  fi
-
-  ## first process all the -x --xxxx flags and options
-  while true; do
-    # flag <flag> is saved as $flag = 0/1
-    # option <option> is saved as $option
-    if [[ $# -eq 0 ]]; then
-      ## all parameters processed
-      break
-    fi
-    if [[ ! $1 == -?* ]]; then
-      ## all flags/options processed
-      break
-    fi
-    local save_option
-    save_option=$(Option:config |
-      awk -v opt="$1" '
-        BEGIN { FS="|"; OFS=" ";}
-        $1 ~ /flag/   &&  "-"$2 == opt {print $3"=1"}
-        $1 ~ /flag/   && "--"$3 == opt {print $3"=1"}
-        $1 ~ /option/ &&  "-"$2 == opt {print $3"=${2:-}; shift"}
-        $1 ~ /option/ && "--"$3 == opt {print $3"=${2:-}; shift"}
-        $1 ~ /list/ &&  "-"$2 == opt {print $3"+=(${2:-}); shift"}
-        $1 ~ /list/ && "--"$3 == opt {print $3"=(${2:-}); shift"}
-        $1 ~ /secret/ &&  "-"$2 == opt {print $3"=${2:-}; shift #noshow"}
-        $1 ~ /secret/ && "--"$3 == opt {print $3"=${2:-}; shift #noshow"}
-        ')
-    if [[ -n "$save_option" ]]; then
-      if echo "$save_option" | grep shift >>/dev/null; then
-        local save_var
-        save_var=$(echo "$save_option" | cut -d= -f1)
-        IO:debug "$config_icon parameter: ${save_var}=$2"
-      else
-        IO:debug "$config_icon flag: $save_option"
-      fi
-      eval "$save_option"
-    else
-      IO:die "cannot interpret option [$1]"
-    fi
-    shift
-  done
-
-  ((help)) && (
-    Option:usage
-    Script:check_version
-    IO:print "                                  "
-    echo "### TIPS & EXAMPLES"
-    Script:show_tips
-
-  ) && Script:exit
-
-  local option_list
-  local option_count
-  local choices
-  local single_params
-  ## then run through the given parameters
-  if Option:has_choice; then
-    choices=$(Option:config | awk -F"|" '
-      $1 == "choice" && $2 == 1 {print $3}
-      ')
-    option_list=$(xargs <<<"$choices")
-    option_count=$(wc <<<"$choices" -w | xargs)
-    IO:debug "$config_icon Expect : $option_count choice(s): $option_list"
-    [[ $# -eq 0 ]] && IO:die "need the choice(s) [$option_list]"
-
-    local choices_list
-    local valid_choice
-    local param
-    for param in $choices; do
-      [[ $# -eq 0 ]] && IO:die "need choice [$param]"
-      [[ -z "$1" ]] && IO:die "need choice [$param]"
-      IO:debug "$config_icon Assign : $param=$1"
-      # check if choice is in list
-      choices_list=$(Option:config | awk -F"|" -v choice="$param" '$1 == "choice" && $3 = choice {print $5}')
-      valid_choice=$(tr <<<"$choices_list" "," "\n" | grep "$1")
-      [[ -z "$valid_choice" ]] && IO:die "choice [$1] is not valid, should be in list [$choices_list]"
-
-      eval "$param=\"$1\""
-      shift
-    done
-  else
-    IO:debug "$config_icon No choices to process"
-    choices=""
-    option_count=0
-  fi
-
-  if Option:has_single; then
-    single_params=$(Option:config | awk -F"|" '
-      $1 == "param" && $2 == 1 {print $3}
-      ')
-    option_list=$(xargs <<<"$single_params")
-    option_count=$(wc <<<"$single_params" -w | xargs)
-    IO:debug "$config_icon Expect : $option_count single parameter(s): $option_list"
-    [[ $# -eq 0 ]] && IO:die "need the parameter(s) [$option_list]"
-
-    for param in $single_params; do
-      [[ $# -eq 0 ]] && IO:die "need parameter [$param]"
-      [[ -z "$1" ]] && IO:die "need parameter [$param]"
-      IO:debug "$config_icon Assign : $param=$1"
-      eval "$param=\"$1\""
-      shift
-    done
-  else
-    IO:debug "$config_icon No single params to process"
-    single_params=""
-    option_count=0
-  fi
-
-  if Option:has_optional; then
-    local optional_params
-    local optional_count
-    optional_params=$(Option:config | grep 'param|?|' | cut -d'|' -f3)
-    optional_count=$(wc <<<"$optional_params" -w | xargs)
-    IO:debug "$config_icon Expect : $optional_count optional parameter(s): $(echo "$optional_params" | xargs)"
-
-    for param in $optional_params; do
-      IO:debug "$config_icon Assign : $param=${1:-}"
-      eval "$param=\"${1:-}\""
-      shift
-    done
-  else
-    IO:debug "$config_icon No optional params to process"
-    optional_params=""
-    optional_count=0
-  fi
-
-  if Option:has_multi; then
-    #IO:debug "Process: multi param"
-    local multi_count
-    local multi_param
-    multi_count=$(Option:config | grep -c 'param|n|')
-    multi_param=$(Option:config | grep 'param|n|' | cut -d'|' -f3)
-    IO:debug "$config_icon Expect : $multi_count multi parameter: $multi_param"
-    ((multi_count > 1)) && IO:die "cannot have >1 'multi' parameter: [$multi_param]"
-    ((multi_count > 0)) && [[ $# -eq 0 ]] && IO:die "need the (multi) parameter [$multi_param]"
-    # save the rest of the params in the multi param
-    if [[ -n "$*" ]]; then
-      IO:debug "$config_icon Assign : $multi_param=$*"
-      eval "$multi_param=( $* )"
-    fi
-  else
-    multi_count=0
-    multi_param=""
-    [[ $# -gt 0 ]] && IO:die "cannot interpret extra parameters"
-  fi
-}
-
-function Os:require() {
-  local install_instructions
-  local binary
-  local words
-  local path_binary
-  # $1 = binary that is required
-  binary="$1"
-  path_binary=$(command -v "$binary" 2>/dev/null)
-  [[ -n "$path_binary" ]] && IO:debug "️$require_icon required [$binary] -> $path_binary" && return 0
-  # $2 = how to install it
-  IO:alert "$script_basename needs [$binary] but it cannot be found"
-  words=$(echo "${2:-}" | wc -w)
-  install_instructions="$install_package $1"
-  [[ $words -eq 1 ]] && install_instructions="$install_package $2"
-  [[ $words -gt 1 ]] && install_instructions="${2:-}"
-  if ((FORCE)); then
-    IO:announce "Installing [$1] ..."
-    eval "$install_instructions"
-  else
-    IO:alert "1) install package  : $install_instructions"
-    IO:alert "2) check path       : export PATH=\"[path of your binary]:\$PATH\""
-    IO:die "Missing program/script [$binary]"
-  fi
-}
-
-function Os:folder() {
-  if [[ -n "$1" ]]; then
-    local folder="$1"
-    local max_days=${2:-365}
-    if [[ ! -d "$folder" ]]; then
-      IO:debug "$clean_icon Create folder : [$folder]"
-      mkdir -p "$folder"
-    else
-      IO:debug "$clean_icon Cleanup folder: [$folder] - delete files older than $max_days day(s)"
-      find "$folder" -mtime "+$max_days" -type f -exec rm {} \;
-    fi
-  fi
-}
-
-function Os:follow_link() {
-  [[ ! -L "$1" ]] && echo "$1" && return 0 ## if it's not a symbolic link, return immediately
-  local file_folder link_folder link_name symlink
-  file_folder="$(dirname "$1")"                                                                                   ## check if file has absolute/relative/no path
-  [[ "$file_folder" != /* ]] && file_folder="$(cd -P "$file_folder" &>/dev/null && pwd)"                          ## a relative path was given, resolve it
-  symlink=$(readlink "$1")                                                                                        ## follow the link
-  link_folder=$(dirname "$symlink")                                                                               ## check if link has absolute/relative/no path
-  [[ -z "$link_folder" ]] && link_folder="$file_folder"                                                           ## if no link path, stay in same folder
-  [[ "$link_folder" == \.* ]] && link_folder="$(cd -P "$file_folder" && cd -P "$link_folder" &>/dev/null && pwd)" ## a relative link path was given, resolve it
-  link_name=$(basename "$symlink")
-  IO:debug "$info_icon Symbolic ln: $1 -> [$link_folder/$link_name]"
-  Os:follow_link "$link_folder/$link_name" ## recurse
-}
-
-function Os:notify() {
-  # cf https://levelup.gitconnected.com/5-modern-bash-scripting-techniques-that-only-a-few-programmers-know-4abb58ddadad
-  local message="$1"
-  local source="${2:-$script_basename}"
-
-  [[ -n $(command -v notify-send) ]] && notify-send "$source" "$message"                                      # for Linux
-  [[ -n $(command -v osascript) ]] && osascript -e "display notification \"$message\" with title \"$source\"" # for MacOS
-}
-
-function Os:busy() {
-  # show spinner as long as process $pid is running
-  local pid="$1"
-  local message="${2:-}"
-  local frames=("|" "/" "-" "\\")
-  (
-    while kill -0 "$pid" &>/dev/null; do
-      for frame in "${frames[@]}"; do
-        printf "\r[ $frame ] %s..." "$message"
-        sleep 0.5
-      done
-    done
-    printf "\n"
-  )
-}
-
-function Os:beep() {
-  if [[ -n "$TERM" ]]; then
-    tput bel
-  fi
-}
-
-function Script:meta() {
-
-  script_prefix=$(basename "${BASH_SOURCE[0]}" .sh)
-  script_basename=$(basename "${BASH_SOURCE[0]}")
-  execution_day=$(date "+%Y-%m-%d")
-
-  script_install_path="${BASH_SOURCE[0]}"
-  IO:debug "$info_icon Script path: $script_install_path"
-  script_install_path=$(Os:follow_link "$script_install_path")
-  IO:debug "$info_icon Linked path: $script_install_path"
-  script_install_folder="$(cd -P "$(dirname "$script_install_path")" && pwd)"
-  IO:debug "$info_icon In folder  : $script_install_folder"
-  if [[ -f "$script_install_path" ]]; then
-    script_hash=$(Str:digest <"$script_install_path" 8)
-    script_lines=$(awk <"$script_install_path" 'END {print NR}')
-  fi
-
-  # get shell/operating system/versions
-  shell_brand="sh"
-  shell_version="?"
-  [[ -n "${ZSH_VERSION:-}" ]] && shell_brand="zsh" && shell_version="$ZSH_VERSION"
-  [[ -n "${BASH_VERSION:-}" ]] && shell_brand="bash" && shell_version="$BASH_VERSION"
-  [[ -n "${FISH_VERSION:-}" ]] && shell_brand="fish" && shell_version="$FISH_VERSION"
-  [[ -n "${KSH_VERSION:-}" ]] && shell_brand="ksh" && shell_version="$KSH_VERSION"
-  IO:debug "$info_icon Shell type : $shell_brand - version $shell_version"
-  if [[ "$shell_brand" == "bash" && "${BASH_VERSINFO:-0}" -lt 4 ]]; then
-    IO:die "Bash version 4 or higher is required - current version = ${BASH_VERSINFO:-0}"
-  fi
-
-  os_kernel=$(uname -s)
-  os_version=$(uname -r)
-  os_machine=$(uname -m)
-  install_package=""
-  case "$os_kernel" in
-  CYGWIN* | MSYS* | MINGW*)
-    os_name="Windows"
-    ;;
-  Darwin)
-    os_name=$(sw_vers -productName)       # macOS
-    os_version=$(sw_vers -productVersion) # 11.1
-    install_package="brew install"
-    ;;
-  Linux | GNU*)
-    if [[ $(command -v lsb_release) ]]; then
-      # 'normal' Linux distributions
-      os_name=$(lsb_release -i | awk -F: '{$1=""; gsub(/^[\s\t]+/,"",$2); gsub(/[\s\t]+$/,"",$2); print $2}')    # Ubuntu/Raspbian
-      os_version=$(lsb_release -r | awk -F: '{$1=""; gsub(/^[\s\t]+/,"",$2); gsub(/[\s\t]+$/,"",$2); print $2}') # 20.04
-    else
-      # Synology, QNAP,
-      os_name="Linux"
-    fi
-    [[ -x /bin/apt-cyg ]] && install_package="apt-cyg install"     # Cygwin
-    [[ -x /bin/dpkg ]] && install_package="dpkg -i"                # Synology
-    [[ -x /opt/bin/ipkg ]] && install_package="ipkg install"       # Synology
-    [[ -x /usr/sbin/pkg ]] && install_package="pkg install"        # BSD
-    [[ -x /usr/bin/pacman ]] && install_package="pacman -S"        # Arch Linux
-    [[ -x /usr/bin/zypper ]] && install_package="zypper install"   # Suse Linux
-    [[ -x /usr/bin/emerge ]] && install_package="emerge"           # Gentoo
-    [[ -x /usr/bin/yum ]] && install_package="yum install"         # RedHat RHEL/CentOS/Fedora
-    [[ -x /usr/bin/apk ]] && install_package="apk add"             # Alpine
-    [[ -x /usr/bin/apt-get ]] && install_package="apt-get install" # Debian
-    [[ -x /usr/bin/apt ]] && install_package="apt install"         # Ubuntu
-    ;;
-
-  esac
-  IO:debug "$info_icon System OS  : $os_name ($os_kernel) $os_version on $os_machine"
-  IO:debug "$info_icon Package mgt: $install_package"
-
-  # get last modified date of this script
-  script_modified="??"
-  [[ "$os_kernel" == "Linux" ]] && script_modified=$(stat -c %y "$script_install_path" 2>/dev/null | cut -c1-16) # generic linux
-  [[ "$os_kernel" == "Darwin" ]] && script_modified=$(stat -f "%Sm" "$script_install_path" 2>/dev/null)          # for MacOS
-
-  IO:debug "$info_icon Version  : $script_version"
-  IO:debug "$info_icon Created  : $script_created"
-  IO:debug "$info_icon Modified : $script_modified"
-
-  IO:debug "$info_icon Lines    : $script_lines lines / md5: $script_hash"
-  IO:debug "$info_icon User     : $USER@$HOSTNAME"
-
-  # if run inside a git repo, detect for which remote repo it is
-  if git status &>/dev/null; then
-    git_repo_remote=$(git remote -v | awk '/(fetch)/ {print $2}')
-    IO:debug "$info_icon git remote : $git_repo_remote"
-    git_repo_root=$(git rev-parse --show-toplevel)
-    IO:debug "$info_icon git folder : $git_repo_root"
-  fi
-
-  # get script version from VERSION.md file - which is automatically updated by pforret/setver
-  [[ -f "$script_install_folder/VERSION.md" ]] && script_version=$(cat "$script_install_folder/VERSION.md")
-  # get script version from git tag file - which is automatically updated by pforret/setver
-  [[ -n "$git_repo_root" ]] && [[ -n "$(git tag &>/dev/null)" ]] && script_version=$(git tag --sort=version:refname | tail -1)
-}
-
-function Script:initialize() {
-  log_file=""
-  if [[ -n "${TMP_DIR:-}" ]]; then
-    # clean up TMP folder after 1 day
-    Os:folder "$TMP_DIR" 1
-  fi
-  if [[ -n "${LOG_DIR:-}" ]]; then
-    # clean up LOG folder after 1 month
-    Os:folder "$LOG_DIR" 30
-    log_file="$LOG_DIR/$script_prefix.$execution_day.log"
-    IO:debug "$config_icon log_file: $log_file"
-  fi
-}
-
-function Os:tempfile() {
-  local extension=${1:-txt}
-  local file="${TMP_DIR:-/tmp}/$execution_day.$RANDOM.$extension"
-  IO:debug "$config_icon tmp_file: $file"
-  temp_files+=("$file")
-  echo "$file"
-}
-
-function Os:import_env() {
-  local env_files
-  if [[ $(pwd) == "$script_install_folder" ]]; then
-    env_files=(
-      "$script_install_folder/.env"
-      "$script_install_folder/.$script_prefix.env"
-      "$script_install_folder/$script_prefix.env"
-    )
-  else
-    env_files=(
-      "$script_install_folder/.env"
-      "$script_install_folder/.$script_prefix.env"
-      "$script_install_folder/$script_prefix.env"
-      "./.env"
-      "./.$script_prefix.env"
-      "./$script_prefix.env"
-    )
-  fi
-
-  local env_file
-  for env_file in "${env_files[@]}"; do
-    if [[ -f "$env_file" ]]; then
-      IO:debug "$config_icon Read  dotenv: [$env_file]"
-      local clean_file
-      clean_file=$(Os:clean_env "$env_file")
-      # shellcheck disable=SC1090
-      source "$clean_file" && rm "$clean_file"
-    fi
-  done
-}
-
-function Os:clean_env() {
-  local input="$1"
-  local output="$1.__.sh"
-  [[ ! -f "$input" ]] && IO:die "Input file [$input] does not exist"
-  IO:debug "$clean_icon Clean dotenv: [$output]"
-  awk <"$input" '
-      function ltrim(s) { sub(/^[ \t\r\n]+/, "", s); return s }
-      function rtrim(s) { sub(/[ \t\r\n]+$/, "", s); return s }
-      function trim(s) { return rtrim(ltrim(s)); }
-      /=/ { # skip lines with no equation
-        $0=trim($0);
-        if(substr($0,1,1) != "#"){ # skip comments
-          equal=index($0, "=");
-          key=trim(substr($0,1,equal-1));
-          val=trim(substr($0,equal+1));
-          if(match(val,/^".*"$/) || match(val,/^\047.*\047$/)){
-            print key "=" val
-          } else {
-            print key "=\"" val "\""
-          }
-        }
-      }
-  ' >"$output"
-  echo "$output"
-}
-
-IO:initialize # output settings
-Script:meta   # find installation folder
-
-[[ $run_as_root == 1 ]] && [[ $UID -ne 0 ]] && IO:die "user is $USER, MUST be root to run [$script_basename]"
-[[ $run_as_root == -1 ]] && [[ $UID -eq 0 ]] && IO:die "user is $USER, CANNOT be root to run [$script_basename]"
-
-Option:initialize # set default values for flags & options
-Os:import_env     # load .env, .<prefix>.env, <prefix>.env (script folder + cwd)
-
-if [[ $sourced -eq 0 ]]; then
-  Option:parse "$@" # overwrite with specified options if any
-
-  Script:initialize # clean up folders
-  Script:main       # run Script:main program
-  Script:exit       # exit and clean up
-else
-  # just disable the trap, don't execute Script:main
-  trap - INT TERM EXIT
-fi
+_entry

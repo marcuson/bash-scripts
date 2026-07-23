@@ -1,1390 +1,1669 @@
 #!/usr/bin/env bash
-### ==============================================================================
-### SO HOW DO YOU PROCEED WITH YOUR SCRIPT?
-### 1. define the flags/options/parameters and defaults you need in Option:config()
-### 2. implement the different verbs in Script:main() directly or with helper functions do_action1
-### 3. implement helper functions you defined in previous step
-### ==============================================================================
-###
-### FOR LLMs: QUICK REFERENCE
-### -------------------------
-### ADDING NEW VERBS: In Option:config(), add verb to the choice line (e.g., "action1,action2,newverb")
-###                   then add a case block in Script:main(): newverb) do_newverb ;;
-###
-### OPTIONS/FLAGS become variables:
-###   flag|f|FORCE|...        => $FORCE (0 or 1)
-###   option|o|output|...|x   => $output (default "x")
-###   param|1|input|...       => $input (required positional arg)
-###
-### ENV FILES: Automatically loaded in order (later files override earlier):
-###   1. <script_folder>/.env
-###   2. <script_folder>/.<script_prefix>.env
-###   3. <script_folder>/<script_prefix>.env
-###   4. ./.env (current dir, if different from script folder)
-###   5. ./.<script_prefix>.env
-###   6. ./<script_prefix>.env
-###
-### Os:require "binary" ["package"] - check if binary exists, die if not
-###   Os:require "awk"                      => check for awk, suggest: brew install awk
-###   Os:require "convert" "imagemagick"    => check for convert, suggest: brew install imagemagick
-###   Os:require "prog" "pip install prog"  => check for prog, suggest: pip install prog
-###   With -f/--FORCE flag: auto-installs missing binaries instead of dying
-###
-### IO FUNCTIONS and effect of --QUIET (-Q) and --VERBOSE (-V):
-###   IO:print "msg"   : normal output (stdout)     - hidden by -Q
-###   IO:debug "msg"   : debug info (stderr)        - only shown with -V
-###   IO:success "msg" : success message (stdout)   - hidden by -Q
-###   IO:announce "msg": announcement + 1s pause    - hidden by -Q
-###   IO:alert "msg"   : warning message (stderr)   - always shown
-###   IO:die "msg"     : error message + exit       - always shown
-###   IO:progress "msg": overwriting progress line  - hidden by -Q
-###   IO:log "msg"     : append to $log_file        - not affected by -Q/-V
-###   IO:confirm "?"   : ask y/N question           - skipped (=yes) with -f/--FORCE
-###
-### STRING FUNCTIONS:
-###   Str:trim "  text  "                => "text" (remove leading/trailing whitespace)
-###   Str:lower "HELLO"                  => "hello"
-###   Str:upper "hello"                  => "HELLO"
-###   Str:ascii "café"                   => "cafe" (remove diacritics)
-###   Str:slugify "Hello World!"         => "hello-world" (URL-safe)
-###   Str:slugify "Hello World!" "_"     => "hello_world" (custom separator)
-###   Str:title "hello world"            => "HelloWorld"
-###   Str:title "hello world" "_"        => "Hello_World"
-###   Str:digest 8 <<< "text"            => "d3b07384" (MD5 hash, first N chars)
-### ==============================================================================
 
-### Created by Leonardo Marcucci ( marcuson ) on 2026-05-08
-### Based on https://github.com/pforret/bashew 1.22.1
-script_version="0.0.1" # if there is a VERSION.md in this script's folder, that will have priority over this version number
-readonly script_author="marcuson.nn90@gmail.com"
-readonly script_created="2026-05-08"
-readonly run_as_root=1 # run_as_root: 0 = don't check anything / 1 = script MUST run as root / -1 = script MAY NOT run as root
-readonly script_description="Initialize new Linux installation"
+# @describe Init a new Linux machine.
+# @meta version 0.0.1
+# @meta require-tools sudo
 
-function Option:config() {
-  ### SYNTAX: type|short|long|description[|default][|choices]
-  ###
-  ### flag   => -x or --xxxx sets $xxxx=1 (default: 0)
-  ### option => -x <val> or --xxxx <val> sets $xxxx=val
-  ### list   => -x <v1> -x <v2> sets ${xxxx[@]} array
-  ### param  => positional arg: 1=required, ?=optional, n=multiple
-  ### choice => positional arg with validation against allowed values
-  ###
-  ### Examples:
-  ###   flag|v|VERBOSE|show debug info          => $VERBOSE (0/1)
-  ###   option|o|output|output file|out.txt     => $output (default: out.txt)
-  ###   list|t|tag|add tags                     => ${tag[@]}
-  ###   param|1|input|input file                => $input (required)
-  ###   param|?|extra|optional arg              => $extra (optional)
-  ###   choice|1|action|verb|run,test,build     => $action (validated)
-  grep <<<"
-# common args
-flag|h|help|show usage
-flag|Q|QUIET|no output
-flag|V|VERBOSE|also show debug messages
-flag|f|FORCE|do not ask for confirmation (always yes)
-option|L|LOG_DIR|folder for log files |$HOME/log/$script_prefix
-option|T|TMP_DIR|folder for temp files|/tmp/$script_prefix
-option|o|output|output file|$script_prefix.env
-choice|1|action|action to perform|run,check,env,cfg
-" -v -e '^#' -e '^\s*$'
+#region Meta moved
+# @meta require-tools bw
+# @meta require-tools curl
+# @meta require-tools docker
+#endregion Meta moved
+
+set -euo pipefail
+
+_this_dir="$(cd -P "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" >/dev/null 2>&1 && pwd)"
+
+# File included (base64) [linux-init.mod/linux-init.tpl.env]
+cfg_tpl_content="IyBDb25maWd1cmFibGUgdmFyaWFibGVzCgojIC0tIEdlbmVyYWwKIyAtLS0tIFVzZXIgLSB0aGUgbm9uIHJvb3QgY29uZmlndXJlZCB1c2VyCkxJX19VU0VSPXh4eAojIC0tLS0gSW5zdGFsbGF0aW9uIHR5cGUgLSBzZXJ2ZXIgb3IgZGVza3RvcApMSV9fSU5TVEFMTEFUSU9OX1RZUEU9c2VydmVyCiMgLS0tLSBCaXR3YXJkZW4gaW50ZWdyYXRpb24KTUJTX19CV19fVVJMPXh4eApNQlNfX0JXX19DTElFTlRfSUQ9eHh4Ck1CU19fQldfX0NMSUVOVF9TRUNSRVQ9eHh4Ck1CU19fQldfX01BU1RFUl9QQVNTV09SRD14eHgKCiMgLS0gU3RlcCAwCiMgLS0tLSBBUFQgLSBBZGQgRG9ja2VyIHJlcG8KTElfX0FERF9ET0NLRVJfQVBUX1JFUE9fX0lTX0VOQUJMRUQ9eQojIC0tLS0gQVBUIC0gaW5zdGFsbCBwYWNrYWdlcwpMSV9fQVBUX0lOU1RBTExfUEFDS0FHRVNfX0lTX0VOQUJMRUQ9eQpMSV9fQVBUX0lOU1RBTExfUEFDS0FHRVNfX1BBQ0tBR0VTPSJjYS1jZXJ0aWZpY2F0ZXMsY3VybCxodG9wLGdpdCx1bnppcCxkb2NrZXItY2UsZG9ja2VyLWNlLWNsaSxjb250YWluZXJkLmlvLGRvY2tlci1idWlsZHgtcGx1Z2luLGRvY2tlci1jb21wb3NlLXBsdWdpbiIKIyAtLS0tIFNlcnZpY2VzIC0gZG9ja2VyCkxJX19TUlZfRE9DS0VSX0VOQUJMRVJfX0lTX0VOQUJMRUQ9eQojIC0tLS0gR2l0IC0gYmFzaWMgY29uZmlnCkxJX19HSVRfQ09ORklHX19JU19FTkFCTEVEPXkKTElfX0dJVF9DT05GSUdfX1VTRVJOQU1FPSJGaXJzdE5hbWUgTGFzdE5hbWUiCkxJX19HSVRfQ09ORklHX19FTUFJTD0ieHh4QHh4eC5jb20iCiMgLS0tLSBKb3VybmFsIC0gbGltaXQgc2l6ZQpMSV9fSk9VUk5BTF9MSU1JVF9fSVNfRU5BQkxFRD15CkxJX19KT1VSTkFMX0xJTUlUX19TWVNURU1fTUFYPSIxMDI0TSIKTElfX0pPVVJOQUxfTElNSVRfX0ZJTEVfTUFYPSIxMDBNIgojIC0tLS0gTmFubyAtIGVuYWJsZSBzeW50YXggaGlnaGxpZ2h0aW5nCkxJX19OQU5PX1NZTlRBWF9ISUdITElHSFRJTkdfX0lTX0VOQUJMRUQ9eQojIC0tLS0gTmV0d29yayAtIGVuYWJsZSByb3V0aW5nCkxJX19ORVRXT1JLX1JPVVRJTkdfX0lTX0VOQUJMRUQ9eQojIC0tLS0gTmV0d29yayAtIGVuYWJsZSBzcmMgdmFsaWQgbWFyawpMSV9fTkVUV09SS19TUkNfVkFMSURfTUFSS19fSVNfRU5BQkxFRD15CiMgLS0tLSBTU0ggLSBwcmVwYXJlCiMgTk9URTogTm8gY29uZmlnIGZvciBub3cKIyAtLS0tIFJBTSAtIHNldCBzd2FwcGluZXNzCkxJX19SQU1fU1dBUFBJTkVTU19fSVNfRU5BQkxFRD15CkxJX19SQU1fU1dBUFBJTkVTU19fVkFMVUU9IjEwIgojIC0tLS0gVXNlciAtIGFkZCB0byBncm91cHMKTElfX1VTRVJfQUREX1RPX0dST1VQU19fSVNfRU5BQkxFRD15CkxJX19VU0VSX0FERF9UT19HUk9VUFNfX0dST1VQUz0iZG9ja2VyLHR0eSx1dWNwLGxwIgojIC0tLS0gVXNlciAtIHN1ZG8gd2l0aG91dCBwYXNzd29yZApMSV9fUEFTU1dPUkRMRVNTX1NVRE9fX0lTX0VOQUJMRUQ9eQojIC0tLS0gSW5zdGFsbCBTT1BTCkxJX19JTlNUQUxMX1NPUFNfX0lTX0VOQUJMRUQ9eQojIC0tLS0gSW5zdGFsbCBvaC1teS1wb3NoCkxJX19JTlNUQUxMX09IX01ZX1BPU0hfX0lTX0VOQUJMRUQ9eQojIC0tLS0gS29tb2RvIHByZXAKTElfX0tPTU9ET19QUkVQX19JU19FTkFCTEVEPXkKTElfX0tPTU9ET19QUkVQX19TT1BTX0tFWT14eHgKCiMgLS0gU3RlcCAxCiMgLS0tLSBEb2NrZXIgLSBsb2dpbgpMSV9fRE9DS0VSX0xPR0lOX19JU19FTkFCTEVEPXkKTElfX0RPQ0tFUl9MT0dJTl9fVVNFUk5BTUU9Inh4eCIKIyAtLS0tIERvY2tlciAtIGN1c3RvbSBicmlkZ2UgbmV0d29yawpMSV9fRE9DS0VSX05FVFdPUktfQ1VTVE9NX0JSSURHRV9fSVNfRU5BQkxFRD15CkxJX19ET0NLRVJfTkVUV09SS19DVVNUT01fQlJJREdFX19OQU1FPSJkb2NrZXJuZXRfYnJpZGdlIgojIC0tLS0gRG9ja2VyIC0gc3RhcnQgY29tcG9zZQpMSV9fRE9DS0VSX0NPTVBPU0VfU1RBUlRfX0lTX0VOQUJMRUQ9bgpMSV9fRE9DS0VSX0NPTVBPU0VfU1RBUlRfX0ZJTEVfUEFUSD0iL2Fic29sdXRlL3BhdGgvdG8vZG9ja2VyLWNvbXBvc2UueW1sIgojIC0tLS0gQmFja3VwIC0gcmVzdG9yZQpMSV9fQkFDS1VQX1JFU1RPUkVfX0lTX0VOQUJMRUQ9bgpMSV9fQkFDS1VQX1JFU1RPUkVfX0ZJTEVfUEFUSD0iL2Fic29sdXRlL3BhdGgvdG8vYmFja3VwLnRhci5neiIK"
+
+#region Bundler import [utils.mod/io.sh]
+
+# Prints text to stdout.
+#
+# Args:
+#   msg: Message or text to print. Accepts multiple arguments.
+# Outputs:
+#   Prints the provided message to stdout.
+Mbs:Io:print() {
+	printf '%b\n' "$*"
 }
 
-#####################################################################
-## Put your Script:main script here
-#####################################################################
-
-function Script:main() {
-  set -e
-
-  # Constants
-  readonly progress_filename="$script_prefix.progress"
-  readonly bw_filename="$script_prefix.bw"
-  readonly modules_d="$script_install_folder/linux-init.mod"
-
-  ## TO ADD A NEW VERB: 1) add it to choice line in Option:config()
-  ##                    2) add a case block below: myverb) do_myverb ;;
-  ##                    3) implement do_myverb() function
-  IO:log "[$script_basename] $script_version started"
-
-  Os:require "awk"
-
-  case "${action,,}" in # ${action,,} = lowercase $action
-
-  cfg)
-    #TIP: use «$script_prefix cfg» to generate a default config file
-    #TIP:> $script_prefix cfg
-    do_cfg
-    ;;
-
-  run)
-    #TIP: use «$script_prefix action1» to ...
-    #TIP:> $script_prefix action1
-    do_run
-    ;;
-
-  check | env)
-    ## leave this default action, it will make it easier to test your script
-    #TIP: use «$script_prefix check» to check if this script is ready to execute and what values the options/flags are
-    #TIP:> $script_prefix check
-    #TIP: use «$script_prefix env» to generate an example .env file
-    #TIP:> $script_prefix env > .env
-    Script:check
-    ;;
-
-  update)
-    ## leave this default action, it will make it easier to test your script
-    #TIP: use «$script_prefix update» to update to the latest version
-    #TIP:> $script_prefix update
-    Script:git_pull
-    ;;
-
-  *)
-    IO:die "action [$action] not recognized"
-    ;;
-  esac
-  IO:log "[$script_basename] ended after $SECONDS secs"
-  #TIP: >>> bash script created with «pforret/bashew»
-  #TIP: >>> for bash development, also check out «pforret/setver» and «pforret/progressbar»
-
-  set +e
+# Prints an error message with an [ERR] prefix.
+#
+# Args:
+#   msg: Error message text to print.
+# Outputs:
+#   Prints the provided message to stdout with an [ERR] prefix.
+Mbs:Io:error() {
+	Mbs:Io:print '[ERR]' "$*"
 }
 
-#####################################################################
-## Put your helper scripts here
-## Available variables: all flags/options from Option:config()
-## Useful functions: IO:print, IO:debug, IO:die, IO:success, IO:confirm
-##                   Os:require "binary" [install_cmd], Os:tempfile [ext]
-#####################################################################
-
-function do_cfg() {
-  IO:print "Generate default config file"
-
-  local original_cfg_f="$modules_d/$script_prefix.tpl.env"
-  local cfg_f="${outfile:-./$script_prefix.env}"
-  if [[ -f "$cfg_f" ]]; then
-    if IO:confirm "Config file already exists at $cfg_f, do you want to overwrite it?"; then
-      IO:debug "Overwrite config file $cfg_f"
-    else
-      IO:print "Config file generation cancelled, exiting."
-      Script:exit
-    fi
-  fi
-
-  cp -f "$original_cfg_f" "$cfg_f"
-  IO:success "Config file generated at $cfg_f"
+# Prints a warning message with a [WRN] prefix.
+#
+# Args:
+#   msg: Warning message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [WRN] prefix.
+Mbs:Io:warn() {
+	Mbs:Io:print '[WRN]' "$*"
 }
 
-function do_run() {
-  IO:print "Linux init start"
-
-  # Source utils
-  # shellcheck source=linux-init.mod/utils.sh
-  . "$modules_d/utils.sh"
-
-  LinuxInitMod:addTrap "LinuxInitMod:bwLock" INT
-  LinuxInitMod:addTrap "LinuxInitMod:bwLock" TERM
-  LinuxInitMod:addTrap "LinuxInitMod:bwLock" EXIT
-
-  LinuxInitMod:ensureVar LI__USER "normal user name"
-
-  if ! LinuxInitMod:isNormalUser "$LI__USER"; then
-    IO:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
-  fi
-
-  home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
-  home_init_user_d="$home_user_d/.$script_prefix"
-  helper_f="$home_init_user_d/${progress_filename}"
-  bw_helper_f="$home_init_user_d/${bw_filename}"
-
-  # Create helper files if not found
-  sudo -u "$LI__USER" mkdir -p "$home_init_user_d"
-  if [ ! -f "$helper_f" ]; then
-    echo "0" | sudo -u "$LI__USER" tee "$helper_f" >/dev/null
-  fi
-
-  if [ ! -f "$bw_helper_f" ]; then
-    sudo -u "$LI__USER" touch "$bw_helper_f" >/dev/null
-  fi
-
-  # Override run
-  if [[ $(type -t do_run_step_override) == "function" ]]; then
-    do_run_step_override
-    LinuxInitMod:bwLock
-    Script:exit
-  fi
-
-  # Normal run
-  helper_f_content=$(<"$helper_f")
-
-  if [[ "$helper_f_content" == "2" ]]; then
-    IO:print "All config already done, exiting."
-  elif [[ "$helper_f_content" == "0" ]]; then
-    do_run_step_0
-  elif [[ "$helper_f_content" == "1" ]]; then
-    do_run_step_1
-  fi
-
-  LinuxInitMod:bwLock
-  Script:exit
+# Prints an informational message with an [INF] prefix.
+#
+# Args:
+#   msg: Informational message text to print.
+# Outputs:
+#   Prints the provided message to stdout with an [INF] prefix.
+Mbs:Io:info() {
+	Mbs:Io:print '[INF]' "$*"
 }
 
-# Uncomment and modify for contained manual testing
-# function do_run_step_override() {
-#   LinuxInitMod:printSep
-#   IO:print "Linux init start (OVERRIDE)"
-
-#   # shellcheck source=linux-init.mod/s0.komodo-prep.sh
-#   . "$modules_d/s0.komodo-prep.sh"
-#   LinuxInitMod:komodoPrep || IO:die "Failed to prep Komodo"
-# }
-
-function do_run_step_0() {
-  IO:print "First init pass"
-
-  # APT - update
-  LinuxInitMod:printSep
-  IO:print "Updating packages"
-  apt -y update
-  apt -y upgrade
-  echo "Packages updated"
-
-  # Journal - limit size
-  if LinuxInitMod:checkInitConfig "LI__JOURNAL_LIMIT__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.journal-limit.sh
-    . "$modules_d/s0.journal-limit.sh"
-    LinuxInitMod:limitJournal || IO:die "Failed to limit journal size"
-  fi
-
-  # RAM - set swappiness
-  if LinuxInitMod:checkInitConfig "LI__RAM_SWAPPINESS__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.swappiness.sh
-    . "$modules_d/s0.swappiness.sh"
-    LinuxInitMod:setSwappiness || IO:die "Failed to set swappiness"
-  fi
-
-  # APT - add Docker repo
-  if LinuxInitMod:checkInitConfig "LI__ADD_DOCKER_APT_REPO__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.apt-add-docker-repo.sh
-    . "$modules_d/s0.apt-add-docker-repo.sh"
-    LinuxInitMod:aptAddDockerRepo || IO:die "Failed to add Docker APT repo"
-  fi
-
-  # APT - install packages
-  if LinuxInitMod:checkInitConfig "LI__APT_INSTALL_PACKAGES__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.apt-install-pkgs.sh
-    . "$modules_d/s0.apt-install-pkgs.sh"
-    LinuxInitMod:installAptPackages || IO:die "Failed to install APT packages"
-  fi
-
-  # User - add to groups
-  if LinuxInitMod:checkInitConfig "LI__USER_ADD_TO_GROUPS__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.user-groups.sh
-    . "$modules_d/s0.user-groups.sh"
-    LinuxInitMod:addUserToGroups || IO:die "Failed to add user to groups"
-  fi
-
-  # User - sudo without password
-  if LinuxInitMod:checkInitConfig "LI__PASSWORDLESS_SUDO__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.user-passwordless-sudo.sh
-    . "$modules_d/s0.user-passwordless-sudo.sh"
-    LinuxInitMod:enablePasswordlessSudo || IO:die "Failed to enable passwordless sudo"
-  fi
-
-  # Nano - enable syntax highlighting
-  if LinuxInitMod:checkInitConfig "LI__NANO_SYNTAX_HIGHLIGHTING__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.nano-syntax-highlighting.sh
-    . "$modules_d/s0.nano-syntax-highlighting.sh"
-    LinuxInitMod:enableNanoSyntaxHighlighting || IO:die "Failed to enable nano syntax highlighting"
-  fi
-
-  # Network - enable routing
-  if LinuxInitMod:checkInitConfig "LI__NETWORK_ROUTING__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.network-routing.sh
-    . "$modules_d/s0.network-routing.sh"
-    LinuxInitMod:enableRouting || IO:die "Failed to enable network routing"
-  fi
-
-  # Network - enable src valid mark
-  if LinuxInitMod:checkInitConfig "LI__NETWORK_SRC_VALID_MARK__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.network-src-valid-mark.sh
-    . "$modules_d/s0.network-src-valid-mark.sh"
-    LinuxInitMod:enableNetSrcValidMark || IO:die "Failed to enable network src valid mark"
-  fi
-
-  # SSH - prepare
-  LinuxInitMod:printSep
-  # shellcheck source=linux-init.mod/s0.ssh-prepare.sh
-  . "$modules_d/s0.ssh-prepare.sh"
-  LinuxInitMod:prepareSSH || IO:die "Failed to prepare SSH"
-
-  # Services - docker
-  if LinuxInitMod:checkInitConfig "LI__SRV_DOCKER_ENABLER__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.docker-service-enabler.sh
-    . "$modules_d/s0.docker-service-enabler.sh"
-    LinuxInitMod:enableDockerService || IO:die "Failed to enable Docker services"
-  fi
-
-  # Git - config
-  if LinuxInitMod:checkInitConfig "LI__GIT_CONFIG__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.git-config.sh
-    . "$modules_d/s0.git-config.sh"
-    LinuxInitMod:configGit || IO:die "Failed to configure Git"
-  fi
-
-  # Install oh-my-posh
-  if LinuxInitMod:checkInitConfig "LI__INSTALL_OH_MY_POSH__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.install-oh-my-posh.sh
-    . "$modules_d/s0.install-oh-my-posh.sh"
-    LinuxInitMod:installOhMyPosh || IO:die "Failed to install oh-my-posh"
-  fi
-
-  # Install SOPS
-  if LinuxInitMod:checkInitConfig "LI__INSTALL_SOPS__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.install-sops.sh
-    . "$modules_d/s0.install-sops.sh"
-    LinuxInitMod:installSops || IO:die "Failed to install SOPS"
-  fi
-
-  # Prep Komodo
-  if LinuxInitMod:checkInitConfig "LI__KOMODO_PREP__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s0.komodo-prep.sh
-    . "$modules_d/s0.komodo-prep.sh"
-    LinuxInitMod:komodoPrep || IO:die "Failed to prep Komodo"
-  fi
-
-  # Pass 0 done
-  echo "1" | tee "$helper_f" >/dev/null
-  LinuxInitMod:printSep
-  IO:success "First part of the config done"
-  IO:print ""
-  IO:print "Please check sshd config using 'sudo sshd -t' command and fix any problem before rebooting"
-  IO:print "If the command sudo sshd -t has no output the config is ok"
-  IO:print ""
-  IO:print "Reboot and run this script again to finalize the configuration"
-  Script:exit
+# Prints a success message with a [SUC] prefix.
+#
+# Args:
+#   msg: Success message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [SUC] prefix.
+Mbs:Io:success() {
+	Mbs:Io:print '[SUC]' "$*"
 }
 
-function do_run_step_1() {
-  IO:print "Second init pass"
-
-  # Docker - login
-  if LinuxInitMod:checkInitConfig "LI__DOCKER_LOGIN__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s1.docker-login.sh
-    . "$modules_d/s1.docker-login.sh"
-    LinuxInitMod:dockerLogin || IO:die "Failed to login to Docker"
-  fi
-
-  # Docker - custom bridge network
-  if LinuxInitMod:checkInitConfig "LI__DOCKER_NETWORK_CUSTOM_BRIDGE__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s1.docker-custom-bridge.sh
-    . "$modules_d/s1.docker-custom-bridge.sh"
-    LinuxInitMod:createCustomDockerBridgeNetwork || IO:die "Failed to create custom Docker bridge network"
-  fi
-
-  # Backup - restore
-  if LinuxInitMod:checkInitConfig "LI__BACKUP_RESTORE__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s1.backup-restore.sh
-    . "$modules_d/s1.backup-restore.sh"
-    LinuxInitMod:restoreBackup || IO:die "Failed to restore backup"
-  fi
-
-  if LinuxInitMod:checkInitConfig "LI__DOCKER_COMPOSE_START__IS_ENABLED"; then
-    LinuxInitMod:printSep
-    # shellcheck source=linux-init.mod/s1.docker-compose-start.sh
-    . "$modules_d/s1.docker-compose-start.sh"
-    LinuxInitMod:startDockerCompose || IO:die "Failed to start Docker Compose"
-  fi
-
-  echo "2" | tee "$helper_f" >/dev/null
-  LinuxInitMod:printSep
-  IO:success "Second part of the config done"
-  Script:exit
+# Prints a debug message with a [DBG] prefix.
+#
+# Args:
+#   msg: Success message text to print.
+# Outputs:
+#   Prints the provided message to stdout with a [DBG] prefix.
+Mbs:Io:debug() {
+	Mbs:Io:print '[DBG]' "$*"
 }
 
-#region Do not edit below this line
-
-#####################################################################
-################### DO NOT MODIFY BELOW THIS LINE ###################
-#####################################################################
-
-action=""
-error_prefix=""
-git_repo_remote=""
-git_repo_root=""
-install_package=""
-os_kernel=""
-os_machine=""
-os_name=""
-os_version=""
-script_basename=""
-script_hash="?"
-script_lines="?"
-script_prefix=""
-shell_brand=""
-shell_version=""
-temp_files=()
-
-# set strict mode -  via http://redsymbol.net/articles/unofficial-bash-strict-mode/
-# removed -e because it made basic [[ testing ]] difficult
-set -uo pipefail
-IFS=$'\n\t'
-FORCE=0
-help=0
-
-#to enable VERBOSE even before option parsing
-VERBOSE=0
-[[ $# -gt 0 ]] && [[ $1 == "-v" ]] && VERBOSE=1
-
-#to enable QUIET even before option parsing
-QUIET=0
-[[ $# -gt 0 ]] && [[ $1 == "-q" ]] && QUIET=1
-
-txtReset=""
-txtError=""
-txtInfo=""
-txtInfo=""
-txtWarn=""
-txtBold=""
-txtItalic=""
-txtUnderline=""
-
-char_succes="OK "
-char_fail="!! "
-char_alert="?? "
-char_wait="..."
-info_icon="(i)"
-config_icon="[c]"
-clean_icon="[c]"
-require_icon="[r]"
-
-### stdIO:print/stderr output
-function IO:initialize() {
-  script_started_at="$(Tool:time)"
-  IO:debug "script $script_basename started at $script_started_at"
-
-  [[ "${BASH_SOURCE[0]:-}" != "${0}" ]] && sourced=1 || sourced=0
-  [[ -t 1 ]] && piped=0 || piped=1 # detect if output is piped
-  if [[ $piped -eq 0 && -n "$TERM" ]]; then
-    txtReset=$(tput sgr0)
-    txtError=$(tput setaf 160)
-    txtInfo=$(tput setaf 2)
-    txtWarn=$(tput setaf 214)
-    txtBold=$(tput bold)
-    txtItalic=$(tput sitm)
-    txtUnderline=$(tput smul)
-  fi
-
-  [[ $(echo -e '\xe2\x82\xac') == '€' ]] && unicode=1 || unicode=0 # detect if unicode is supported
-  if [[ $unicode -gt 0 ]]; then
-    char_succes="✅"
-    char_fail="⛔"
-    char_alert="✴️"
-    char_wait="⏳"
-    info_icon="🌼"
-    config_icon="🌱"
-    clean_icon="🧽"
-    require_icon="🔌"
-  fi
-  error_prefix="${txtError}>${txtReset}"
+# Prints a simple separator line.
+#
+# Outputs:
+#   Prints a separator to stdout.
+Mbs:Io:printSep() {
+	Mbs:Io:print "\n-----------------------------\n"
 }
 
-function IO:print() {
-  ((QUIET)) && true || printf '%b\n' "$*"
+# Pauses execution until the user presses a key.
+#
+# Outputs:
+#   Prompts the user to press any key and then continues.
+# Returns:
+#   0 after the user presses a key.
+Mbs:Io:paktc() {
+	Mbs:Io:print ""
+	Mbs:Io:print "Press any key to continue"
+	read -n 1 -s -r
+	Mbs:Io:print ""
 }
 
-function IO:debug() {
-  ((VERBOSE)) && IO:print "${txtInfo}# $* ${txtReset}" >&2
-  true
+Mbs:Io:confirm() {
+	local default_choice text_suffix
+	default_choice="$1"
+	[[ $default_choice =~ ^[Yy]$ ]] && text_suffix="[Y/n]" || text_suffix="[y/N]"
+
+	read -r -p "$2 $text_suffix " -n 1
+	echo " "
+
+	local answer
+	answer="${REPLY:-$default_choice}"
+	[[ $answer =~ ^[Yy]$ ]]
 }
 
-function IO:die() {
-  IO:print "${txtError}${char_fail} $script_basename${txtReset}: $*" >&2
-  Os:beep
-  Script:exit
+Mbs:Io:confirmDefaultNo() {
+	Mbs:Io:confirm "n" "$1"
 }
 
-function IO:alert() {
-  IO:print "${txtWarn}${char_alert}${txtReset}: ${txtUnderline}$*${txtReset}" >&2
+Mbs:Io:confirmDefaultYes() {
+	Mbs:Io:confirm "y" "$1"
+}
+#endregion Bundler import [utils.mod/io.sh]
+#region Bundler import [utils.mod/script.sh]
+
+# Registers a trap handler for a signal.
+#
+# Args:
+#   cmd: Command or snippet to run when the trap fires.
+#   sig: Signal name or numeric value. Defaults to EXIT.
+# Returns:
+#   0 if the trap was registered successfully.
+#   1 if the signal is invalid.
+Mbs:Script:addTrap() {
+	local cmd=$1         # command(s) to add
+	local sig=${2:-EXIT} # signal name or number
+
+	# validate signal name or numeric id
+	local sig_name
+	{
+		if [[ $sig =~ ^[0-9]+$ ]]; then
+			sig_name=$(kill -l "$sig")
+		else
+			sig_name=${sig^^}
+			kill -l "$sig_name" &>/dev/null
+		fi
+	} || {
+		echo "add_trap: invalid signal '$sig'" >&2
+		return 1
+	}
+
+	# Compute effective trap list for current (sub)shell
+	# Based on info from https://stackoverflow.com/a/59307894/5116073
+	local old
+	if [[ ${BASH_VERSINFO:-0} -ge 4 ]]; then
+		trap -- KILL &>/dev/null || true
+		old=$(trap -p "$sig_name")
+	else
+		old=$(trap -p "$sig_name")
+	fi
+
+	# extract/cleanup the existing registered command(s)
+	old=${old#*\'}         # remove leading "trap -- '"
+	old=${old%\'*}         # remove trailing "' EXIT"
+	old=${old//"'\''"/"'"} # unescape every '\'' to '
+
+	# if command is already registered, do nothing
+	if [[ ";$old;" == *";$cmd;"* ]]; then
+		return 0
+	fi
+
+	# build the new combined handler
+	if [[ -n $old ]]; then
+		combined="$old;$cmd"
+	else
+		combined="$cmd"
+	fi
+
+	# register the new combined handler
+	trap -- "$combined" "$sig"
 }
 
-function IO:success() {
-  IO:print "${txtInfo}${char_succes}${txtReset}  ${txtBold}$*${txtReset}"
+Mbs:Script:addTrapMultiSignal() {
+	local cmd="${1:-}"
+	shift || true
+
+	# Validate that at least command and one signal are provided
+	if [[ -z $cmd || $# -eq 0 ]]; then
+		echo "Usage: Mbs:Script:addTrapMultiSignal <command> <signal1> [signal2 ...]" >&2
+		return 1
+	fi
+
+	local sig
+	for sig in "$@"; do
+		Mbs:Script:addTrap "$cmd" "$sig" || return 1
+	done
 }
 
-function IO:announce() {
-  IO:print "${txtInfo}${char_wait}${txtReset}  ${txtItalic}$*${txtReset}"
-  sleep 1
+# Prints the current call stack.
+#
+# Outputs:
+#   Prints each caller and line number to stdout.
+Mbs:Script:callStack() {
+	local i=1
+	while caller $i; do
+		((i++))
+	done
 }
 
-function IO:progress() {
-  ((QUIET)) || (
-    local screen_width
-    screen_width=$(tput cols 2>/dev/null || echo 80)
-    local rest_of_line
-    rest_of_line=$((screen_width - 5))
+# Check whether a given name resolves to a shell function.
+#
+# Args:
+#   $1: Name of the function to inspect.
+# Returns:
+#   0 if the name resolves to a function.
+#   1 otherwise.
+Mbs:Script:isFunc() {
+	local res
+	res=$(type -t "$1" || echo "NONE")
 
-    if ((piped)); then
-      IO:print "... $*" >&2
-    else
-      printf "... %-${rest_of_line}b\r" "$*                                             " >&2
-    fi
-  )
+	if [ "$res" == "function" ]; then
+		return 0
+	else
+		return 1
+	fi
 }
 
-function IO:countdown() {
-  local seconds=${1:-5}
-  local message=${2:-Countdown :}
-  local i
+Mbs:Script:die() {
+	Mbs:Io:error "$@"
 
-  if ((piped)); then
-    IO:print "$message $seconds seconds"
-  else
-    for ((i = 0; i < "$seconds"; i++)); do
-      IO:progress "${txtInfo}$message $((seconds - i)) seconds${txtReset}"
-      sleep 1
-    done
-    IO:print "                         "
-  fi
+	# FIXME: Unregister traps
+	exit 1
+}
+#endregion Bundler import [utils.mod/script.sh]
+
+# Constants
+readonly progress_filename="progress"
+readonly bw_filename="bw.sessions"
+
+# @cmd Create a config template.
+# @arg out-file Where to write the file. Defaults to /etc/linux-init/config.env
+cfg() {
+	Mbs:Io:print "Generate default config file"
+
+	local cfg_f="${argc_out_file:-/etc/linux-init/config.env}"
+	if [[ -f $cfg_f ]]; then
+		if Mbs:Io:confirmDefaultNo "Config file already exists at $cfg_f, do you want to overwrite it?"; then
+			Mbs:Io:debug "Overwrite config file $cfg_f"
+		else
+			Mbs:Io:print "Config file generation cancelled, exiting."
+			exit 0
+		fi
+	fi
+
+	cfg_d=$(dirname "$cfg_f")
+	mkdir -p "$cfg_d"
+	echo "$cfg_tpl_content" | base64 --decode >"$cfg_f"
+	Mbs:Io:success "Config file generated at $cfg_f"
 }
 
-### interactive
-function IO:confirm() {
-  ((FORCE)) && return 0
-  read -r -p "$1 [y/N] " -n 1
-  echo " "
-  [[ $REPLY =~ ^[Yy]$ ]]
+# @cmd run Load config and init the machine.
+# @arg cfg-file Config file location. Defaults to /etc/linux-init/config.env
+# @option -d --data-dir Data dir location. Defaults to /etc/linux-init/data
+run() {
+	Mbs:Io:print "Linux init start"
+
+	# Source utils
+	#region Bundler import [utils.mod/var.sh]
+
+	# Checks whether a value represents a true-like boolean value.
+	#
+	# Args:
+	#   value: The value to evaluate.
+	# Returns:
+	#   0 when the value is one of: 1, y, true.
+	#   1 otherwise.
+	Mbs:Var:isTrue() {
+		local var_value
+		var_value="$1"
+
+		case "${var_value}" in
+		1 | y | true)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+		esac
+	}
+
+	# Checks whether a variable is set in the current shell.
+	#
+	# Args:
+	#   var_name: Name of the variable to check.
+	# Returns:
+	#   0 if the variable exists and is defined, 1 otherwise.
+	Mbs:Var:isSet() {
+		[ $# -eq 0 ] && return 1
+		[ -z "$1" ] && return 1
+		declare -p "$1" &>/dev/null
+	}
+
+	# Checks whether a value is empty.
+	#
+	# Args:
+	#   value: The value to check.
+	# Returns:
+	#   0 if the provided value is empty, 1 otherwise.
+	Mbs:Var:isEmpty() {
+		[ $# -eq 0 ] && return 1
+		[ -z "$1" ] && return 0
+		return 1
+	}
+
+	# Returns the detected type of a variable.
+	#
+	# Args:
+	#   var_name: Name of the variable to inspect.
+	# Returns:
+	#   0 on success, 1 if the variable is unset.
+	# Output:
+	#   Prints ARRAY, HASH, INT, EXPORT, or OTHER.
+	Mbs:Var:getType() {
+		if ! Mbs:Var:isSet "$1"; then
+			Mbs:Io:print "UNSET"
+			return 1
+		fi
+
+		local var
+		var=$(declare -p "$1" 2>/dev/null)
+		local reg='^declare -n [^=]+=\"([^\"]+)\"$'
+		while [[ $var =~ $reg ]]; do
+			var=$(declare -p "${BASH_REMATCH[1]}")
+		done
+
+		case "${var#declare -}" in
+		a*)
+			Mbs:Io:print "ARRAY"
+			;;
+		A*)
+			Mbs:Io:print "HASH"
+			;;
+		i*)
+			Mbs:Io:print "INT"
+			;;
+		x*)
+			Mbs:Io:print "EXPORT"
+			;;
+		*)
+			Mbs:Io:print "OTHER"
+			;;
+		esac
+		return 0
+	}
+
+	# Checks whether a variable is an array.
+	#
+	# Args:
+	#   var_name: Name of the variable to inspect.
+	# Returns:
+	#   0 if the variable is an array, 1 otherwise.
+	Mbs:Var:isArray() {
+		Mbs:Var:getType "$1" | grep -q "ARRAY"
+	}
+
+	# Checks whether a variable is an integer.
+	#
+	# Args:
+	#   var_name: Name of the variable to inspect.
+	# Returns:
+	#   0 if the variable is an integer, 1 otherwise.
+	Mbs:Var:isInt() {
+		Mbs:Var:getType "$1" | grep -q "INT"
+	}
+
+	# Checks whether a variable is a scalar value of another type.
+	#
+	# Args:
+	#   var_name: Name of the variable to inspect.
+	# Returns:
+	#   0 if the variable is neither an array nor an integer, 1 otherwise.
+	Mbs:Var:isOther() {
+		Mbs:Var:getType "$1" | grep -q "OTHER"
+	}
+
+	# Imports variables from a dotenv file into the current shell.
+	#
+	# Args:
+	#   env_file: Path to the dotenv file to import.
+	# Returns:
+	#   0 on success, 1 if the file does not exist.
+	# Note:
+	#   The imported values are sourced from a temporary cleaned file.
+	Mbs:Var:importDotenv() {
+		local env_file="$1" env_vars=""
+		if [[ -f $env_file ]]; then
+			while IFS='=' read -r key value; do
+				if [[ $key == $'#'* ]] || [[ -z $key ]]; then
+					continue
+				fi
+				if [[ -z ${!key+x} ]]; then
+					env_vars="$env_vars $key=$value"
+				fi
+			done < <(
+				cat "$env_file"
+				echo ""
+			)
+			if [[ -n $env_vars ]]; then
+				eval "export $env_vars"
+			fi
+		fi
+	}
+	#endregion Bundler import [utils.mod/var.sh]
+	#region Bundler import [utils.mod/user.sh]
+
+	# Check whether the current process is running as root.
+	#
+	# Returns:
+	#   0 if the current user is root.
+	#   1 otherwise.
+	Mbs:User:isCurrentRunningAsRoot() {
+		if [ ! "${EUID:-$(id -u)}" -eq 0 ]; then
+			return 1
+		fi
+		return 0
+	}
+
+	# Check whether a supplied username is a normal non-root user.
+	#
+	# Args:
+	#   $1: Username to inspect.
+	# Returns:
+	#   0 if the user exists and is not root.
+	#   1 otherwise.
+	Mbs:User:isNormal() {
+		[ $# -eq 0 ] && return 1
+		Mbs:Var:isEmpty "$1" && return 1
+		! id "$1" &>/dev/null && return 1
+		[ "$1" = "root" ] && return 1
+		return 0
+	}
+
+	# Check whether the current user belongs to a group.
+	#
+	# Args:
+	#   $1: Name of the group to check.
+	# Returns:
+	#   0 if the current user is in the group.
+	#   1 otherwise.
+	Mbs:User:isCurrentInGroup() {
+		[ $# -eq 0 ] && return 1
+		Mbs:Var:isEmpty "$1" && return 1
+		groups 2>/dev/null | grep -q "\b$1\b"
+	}
+
+	# Check whether a given user belongs to a group.
+	#
+	# Args:
+	#   $1: Username to inspect.
+	#   $2: Name of the group to check.
+	# Returns:
+	#   0 if the user is in the group.
+	#   1 otherwise.
+	Mbs:User:isUserInGroup() {
+		[ $# -lt 2 ] && return 1
+		Mbs:Var:isEmpty "$1" && return 1
+		Mbs:Var:isEmpty "$2" && return 1
+		groups "$1" 2>/dev/null | grep -q "\b$2\b"
+	}
+	#endregion Bundler import [utils.mod/user.sh]
+	#region Bundler import [bw.mod/bw.sh]
+
+	# Unlocks the Bitwarden vault and ensures a valid session is available.
+	#
+	# Globals:
+	#   MBS__BW__HELPER_F: Path to the helper file that stores active session IDs.
+	#   MBS__BW__URL: Bitwarden server URL.
+	#   MBS__BW__CLIENT_ID: Bitwarden client ID.
+	#   MBS__BW__CLIENT_SECRET: Bitwarden client secret.
+	#   MBS__BW__MASTER_PASSWORD: Bitwarden master password.
+	# Returns:
+	#   0 if the vault is unlocked successfully, non-zero otherwise.
+	Mbs:Bw:unlock() {
+		if [ -z "${MBS__BW__HELPER_F}" ]; then
+			Mbs:Io:error "Bitwarden helper file path not set, cannot proceed"
+			return 1
+		fi
+
+		if [ ! -f "${MBS__BW__HELPER_F}" ]; then
+			Mbs:Io:error "Bitwarden helper file path does not exist, cannot proceed"
+			return 1
+		fi
+
+		if [ -z "${MBS__BW__URL:-}" ]; then
+			Mbs:Io:error "Missing MBS__BW__URL config, cannot proceed"
+			return 1
+		fi
+		if [ -z "${MBS__BW__CLIENT_ID:-}" ]; then
+			Mbs:Io:error "Missing MBS__BW__CLIENT_ID config, cannot proceed"
+			return 1
+		fi
+		if [ -z "${MBS__BW__CLIENT_SECRET:-}" ]; then
+			Mbs:Io:error "Missing MBS__BW__CLIENT_SECRET config, cannot proceed"
+			return 1
+		fi
+		if [ -z "${MBS__BW__MASTER_PASSWORD:-}" ]; then
+			Mbs:Io:error "Missing MBS__BW__MASTER_PASSWORD config, cannot proceed"
+			return 1
+		fi
+
+		export BW_CLIENTID="${MBS__BW__CLIENT_ID:-}"
+		export BW_CLIENTSECRET="${MBS__BW__CLIENT_SECRET:-}"
+		export BW_MASTER_PASSWORD="${MBS__BW__MASTER_PASSWORD:-}"
+
+		local bw_url
+		local bw_status
+		local session
+
+		bw_url=$(bw status | jq -r .serverUrl 2>/dev/null)
+		if [[ $bw_url != "$MBS__BW__URL" ]]; then
+			Mbs:Io:print "Configuring Bitwarden CLI to use server URL '$MBS__BW__URL'" >/dev/tty
+			Mbs:Bw:lock
+			bw config server "$MBS__BW__URL" >/dev/tty || IO:die "Bitwarden config failed"
+		fi
+
+		bw_status=$(bw status | jq -r .status)
+		if [ -z "$bw_status" ] || [ "$bw_status" = "unauthenticated" ]; then
+			Mbs:Io:print "Bitwarden: login"
+			bw login --apikey || IO:die "Bitwarden login failed"
+		fi
+
+		bw_status=$(bw status | jq -r .status)
+		if [ "$bw_status" = "locked" ]; then
+			Mbs:Io:print "Bitwarden: unlock"
+			session=$(bw unlock --passwordenv BW_MASTER_PASSWORD --raw) || IO:die "Bitwarden unlock failed"
+			echo "$session" >>"$MBS__BW__HELPER_F"
+			export BW_SESSION="$session"
+		fi
+
+		bw sync --force
+	}
+
+	# Locks and invalidates a specific Bitwarden session.
+	#
+	# Arguments:
+	#   session: Session token to invalidate.
+	# Returns:
+	#   0 if the session is already unauthenticated or was invalidated
+	#   successfully, non-zero if invalidation fails.
+	Mbs:Bw:lockSession() {
+		local session
+		session="$1"
+		local bw_status
+
+		bw_status=$(BW_SESSION="$session" bw status | jq -r .status)
+		if [ -z "$bw_status" ] || [ "$bw_status" = "unauthenticated" ]; then
+			Mbs:Io:print "Bitwarden: not logged in"
+			return 0
+		fi
+
+		if ! BW_SESSION="$session" bw lock; then
+			Mbs:Io:error "Failed to invalidate Bitwarden session"
+			return 1
+		fi
+
+		Mbs:Io:print "Bitwarden session invalidated"
+		return 0
+	}
+
+	# Locks the Bitwarden vault and invalidates all stored sessions.
+	#
+	# Globals:
+	#   MBS__BW__HELPER_F: Path to the helper file that stores active session IDs.
+	# Returns:
+	#   0 on success.
+	Mbs:Bw:lock() {
+		Mbs:Io:print "Invalidating Bitwarden sessions from helper file [$MBS__BW__HELPER_F]"
+		if [ -n "${MBS__BW__HELPER_F:-}" ] && [ -f "$MBS__BW__HELPER_F" ]; then
+			while IFS= read -r line; do
+				Mbs:Bw:lockSession "$line"
+			done <"$MBS__BW__HELPER_F"
+		fi
+
+		unset BW_SESSION
+		cat /dev/null >|"$MBS__BW__HELPER_F"
+
+		return 0
+	}
+
+	# Retrieves a value from a Bitwarden item.
+	#
+	# Arguments:
+	#   item_name: Name of the Bitwarden item.
+	#   property: Optional property to retrieve. Defaults to "item".
+	# Returns:
+	#   0 on success, non-zero on failure.
+	Mbs:Bw:get() {
+		if [ $# -lt 1 ]; then
+			Mbs:Io:error "Usage: Mbs:Bw:get <item-name> [property]"
+			return 2
+		fi
+
+		local item_name="$1"
+		local item_field="${2:-item}"
+
+		Mbs:Bw:unlock &>/dev/tty
+
+		bw get "$item_field" "$item_name"
+	}
+
+	# Retrieves the value of a custom field from a Bitwarden item.
+	#
+	# Arguments:
+	#   item_name: Name of the Bitwarden item.
+	#   custom_field: Name of the custom field to retrieve.
+	# Returns:
+	#   0 on success, non-zero on failure.
+	Mbs:Bw:getCF() {
+		if [ $# -lt 2 ]; then
+			Mbs:Io:error "Usage: Mbs:Bw:getCF <item-name> <field-name>"
+			return 2
+		fi
+
+		local item_name="$1"
+		local custom_field="$2"
+
+		Mbs:Bw:get "$item_name" | jq -r ".fields[] | select(.name==\"$custom_field\") | .value"
+	}
+	#endregion Bundler import [bw.mod/bw.sh]
+
+	local data_dir="${argc_data_dir:-/etc/linux-init/data}"
+	local helper_f="$data_dir/${progress_filename}"
+	export MBS__BW__HELPER_F="$data_dir/${bw_filename}"
+
+	li_modules_d="$_this_dir/linux-init.mod"
+
+	# Create helper files if not found
+	mkdir -p "$data_dir"
+	if [ ! -f "$helper_f" ]; then
+		echo "0" | tee "$helper_f" >/dev/null
+	fi
+
+	if [ ! -f "$MBS__BW__HELPER_F" ]; then
+		touch "$MBS__BW__HELPER_F" >/dev/null
+	fi
+
+	local cfg_file
+	cfg_file="${argc_cfg_file:-/etc/linux-init/config.env}"
+	Mbs:Var:importDotenv "$cfg_file"
+
+	Mbs:Script:addTrapMultiSignal "Mbs:Bw:lock" INT TERM EXIT
+
+	if ! Mbs:User:isCurrentRunningAsRoot; then
+		Mbs:Script:die "This script must be run as root"
+	fi
+
+	if ! Mbs:User:isNormal "$LI__USER"; then
+		Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+	fi
+
+	home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+
+	helper_f_content=$(<"$helper_f")
+
+	if [[ $helper_f_content == "2" ]]; then
+		Mbs:Io:print "All config already done, exiting."
+	elif [[ $helper_f_content == "0" ]]; then
+		_run_step_0
+	elif [[ $helper_f_content == "1" ]]; then
+		_run_step_1
+	fi
+
+	exit 0
 }
 
-function IO:question() {
-  local ANSWER
-  local DEFAULT=${2:-}
-  read -r -p "$1 ($DEFAULT) > " ANSWER
-  [[ -z "$ANSWER" ]] && echo "$DEFAULT" || echo "$ANSWER"
-}
-
-function IO:log() {
-  [[ -n "${log_file:-}" ]] && echo "$(date '+%H:%M:%S') | $*" >>"$log_file"
-}
-
-function Tool:calc() {
-  awk "BEGIN {print $*} ; "
-}
-
-function Tool:round() {
-  local number="${1}"
-  local decimals="${2:-0}"
-
-  awk "BEGIN {print sprintf( \"%.${decimals}f\" , $number )};"
-}
-
-function Tool:time() {
-  if [[ $(command -v perl) ]]; then
-    perl -MTime::HiRes=time -e 'printf "%f\n", time'
-  elif [[ $(command -v php) ]]; then
-    php -r 'printf("%f\n",microtime(true));'
-  elif [[ $(command -v python) ]]; then
-    python -c 'import time; print(time.time()) '
-  elif [[ $(command -v python3) ]]; then
-    python3 -c 'import time; print(time.time()) '
-  elif [[ $(command -v node) ]]; then
-    node -e 'console.log(+new Date() / 1000)'
-  elif [[ $(command -v ruby) ]]; then
-    ruby -e 'STDOUT.puts(Time.now.to_f)'
-  else
-    date '+%s.000'
-  fi
-}
-
-function Tool:throughput() {
-  local time_started="$1"
-  [[ -z "$time_started" ]] && time_started="$script_started_at"
-  local operations="${2:-1}"
-  local name="${3:-operation}"
-
-  local time_finished
-  local duration
-  local seconds
-  time_finished="$(Tool:time)"
-  duration="$(Tool:calc "$time_finished - $time_started")"
-  seconds="$(Tool:round "$duration")"
-  local ops
-  if [[ "$operations" -gt 1 ]]; then
-    if [[ $operations -gt $seconds ]]; then
-      ops=$(Tool:calc "$operations / $duration")
-      ops=$(Tool:round "$ops" 3)
-      duration=$(Tool:round "$duration" 2)
-      IO:print "$operations $name finished in $duration secs: $ops $name/sec"
-    else
-      ops=$(Tool:calc "$duration / $operations")
-      ops=$(Tool:round "$ops" 3)
-      duration=$(Tool:round "$duration" 2)
-      IO:print "$operations $name finished in $duration secs: $ops sec/$name"
-    fi
-  else
-    duration=$(Tool:round "$duration" 2)
-    IO:print "$name finished in $duration secs"
-  fi
-}
-
-### string processing
-
-function Str:trim() {
-  local var="$*"
-  # remove leading whitespace characters
-  var="${var#"${var%%[![:space:]]*}"}"
-  # remove trailing whitespace characters
-  var="${var%"${var##*[![:space:]]}"}"
-  printf '%s' "$var"
-}
-
-function Str:lower() {
-  if [[ -n "$1" ]]; then
-    local input="$*"
-    echo "${input,,}"
-  else
-    awk '{print tolower($0)}'
-  fi
-}
-
-function Str:upper() {
-  if [[ -n "$1" ]]; then
-    local input="$*"
-    echo "${input^^}"
-  else
-    awk '{print toupper($0)}'
-  fi
-}
-
-function Str:ascii() {
-  # remove all characters with accents/diacritics to latin alphabet
-  # shellcheck disable=SC2020
-  sed 'y/àáâäæãåāǎçćčèéêëēėęěîïííīįìǐłñńôöòóœøōǒõßśšûüǔùǖǘǚǜúūÿžźżÀÁÂÄÆÃÅĀǍÇĆČÈÉÊËĒĖĘĚÎÏÍÍĪĮÌǏŁÑŃÔÖÒÓŒØŌǑÕẞŚŠÛÜǓÙǕǗǙǛÚŪŸŽŹŻ/aaaaaaaaaccceeeeeeeeiiiiiiiilnnooooooooosssuuuuuuuuuuyzzzAAAAAAAAACCCEEEEEEEEIIIIIIIILNNOOOOOOOOOSSSUUUUUUUUUUYZZZ/'
-}
-
-function Str:slugify() {
-  # Str:slugify <input> <separator>
-  # Str:slugify "Jack, Jill & Clémence LTD"      => jack-jill-clemence-ltd
-  # Str:slugify "Jack, Jill & Clémence LTD" "_"  => jack_jill_clemence_ltd
-  separator="${2:-}"
-  [[ -z "$separator" ]] && separator="-"
-  Str:lower "$1" |
-    Str:ascii |
-    awk '{
-          gsub(/[\[\]@#$%^&*;,.:()<>!?\/+=_]/," ",$0);
-          gsub(/^  */,"",$0);
-          gsub(/  *$/,"",$0);
-          gsub(/  */,"-",$0);
-          gsub(/[^a-z0-9\-]/,"");
-          print;
-          }' |
-    sed "s/-/$separator/g"
-}
-
-function Str:title() {
-  # Str:title <input> <separator>
-  # Str:title "Jack, Jill & Clémence LTD"     => JackJillClemenceLtd
-  # Str:title "Jack, Jill & Clémence LTD" "_" => Jack_Jill_Clemence_Ltd
-  separator="${2:-}"
-  # shellcheck disable=SC2020
-  Str:lower "$1" |
-    tr 'àáâäæãåāçćčèéêëēėęîïííīįìłñńôöòóœøōõßśšûüùúūÿžźż' 'aaaaaaaaccceeeeeeeiiiiiiilnnoooooooosssuuuuuyzzz' |
-    awk '{ gsub(/[\[\]@#$%^&*;,.:()<>!?\/+=_-]/," ",$0); print $0; }' |
-    awk '{
-          for (i=1; i<=NF; ++i) {
-              $i = toupper(substr($i,1,1)) tolower(substr($i,2))
-          };
-          print $0;
-          }' |
-    sed "s/ /$separator/g" |
-    cut -c1-50
-}
-
-function Str:digest() {
-  local length=${1:-6}
-  if [[ -n $(command -v md5sum) ]]; then
-    # regular linux
-    md5sum | cut -c1-"$length"
-  else
-    # macos
-    md5 | cut -c1-"$length"
-  fi
-}
-
-# Gha: function should only be run inside of a Github Action
-
-function Gha:finish() {
-  [[ -z "${RUNNER_OS:-}" ]] && IO:die "This should only run inside a Github Action, don't run it on your machine"
-  local timestamp message
-  git config user.name "Bashew Runner"
-  git config user.email "actions@users.noreply.github.com"
-  git add -A
-  timestamp="$(date -u)"
-  message="$timestamp < $script_basename $script_version"
-  IO:print "Commit Message: $message"
-  git commit -m "${message}" || exit 0
-  git pull --rebase
-  git push
-  IO:success "Commit OK!"
-}
-
-trap "IO:die \"ERROR \$? after \$SECONDS seconds \n\
-\${error_prefix} last command : '\$BASH_COMMAND' \" \
-\$(< \$script_install_path awk -v lineno=\$LINENO \
-'NR == lineno {print \"\${error_prefix} from line \" lineno \" : \" \$0}')" INT TERM EXIT
-# cf https://askubuntu.com/questions/513932/what-is-the-bash-command-variable-good-for
-
-Script:exit() {
-  local temp_file
-  for temp_file in "${temp_files[@]-}"; do
-    [[ -f "$temp_file" ]] && (
-      IO:debug "Delete temp file [$temp_file]"
-      rm -f "$temp_file"
-    )
-  done
-  trap - INT TERM EXIT
-  IO:debug "$script_basename finished after $SECONDS seconds"
-  exit 0
-}
-
-Script:check_version() {
-  (
-    # shellcheck disable=SC2164
-    pushd "$script_install_folder" &>/dev/null
-    if [[ -d .git ]]; then
-      local remote
-      remote="$(git remote -v | grep fetch | awk 'NR == 1 {print $2}')"
-      IO:progress "Check for updates - $remote"
-      git remote update &>/dev/null
-      if [[ $(git rev-list --count "HEAD...HEAD@{upstream}" 2>/dev/null) -gt 0 ]]; then
-        IO:print "There is a more recent update of this script - run <<$script_prefix update>> to update"
-      else
-        IO:progress "                                         "
-      fi
-    fi
-    # shellcheck disable=SC2164
-    popd &>/dev/null
-  )
-}
-
-Script:git_pull() {
-  # run in background to avoid problems with modifying a running interpreted script
-  (
-    sleep 1
-    cd "$script_install_folder" && git pull
-  ) &
-}
-
-Script:show_tips() {
-  ((sourced)) && return 0
-  # shellcheck disable=SC2016
-  grep <"${BASH_SOURCE[0]}" -v '$0' |
-    awk \
-      -v green="$txtInfo" \
-      -v yellow="$txtWarn" \
-      -v reset="$txtReset" \
-      '
-      /TIP: /  {$1=""; gsub(/«/,green); gsub(/»/,reset); print "*" $0}
-      /TIP:> / {$1=""; print " " yellow $0 reset}
-      ' |
-    awk \
-      -v script_basename="$script_basename" \
-      -v script_prefix="$script_prefix" \
-      '{
-      gsub(/\$script_basename/,script_basename);
-      gsub(/\$script_prefix/,script_prefix);
-      print ;
-      }'
-}
-
-Script:check() {
-  local name
-  if [[ -n $(Option:filter flag) ]]; then
-    IO:print "## ${txtInfo}boolean flags${txtReset}:"
-    Option:filter flag |
-      grep -v help |
-      while read -r name; do
-        declare -p "$name" | cut -d' ' -f3-
-      done
-  fi
-
-  if [[ -n $(Option:filter option) ]]; then
-    IO:print "## ${txtInfo}option defaults${txtReset}:"
-    Option:filter option |
-      while read -r name; do
-        declare -p "$name" | cut -d' ' -f3-
-      done
-  fi
-
-  if [[ -n $(Option:filter list) ]]; then
-    IO:print "## ${txtInfo}list options${txtReset}:"
-    Option:filter list |
-      while read -r name; do
-        declare -p "$name" | cut -d' ' -f3-
-      done
-  fi
-
-  if [[ -n $(Option:filter param) ]]; then
-    if ((piped)); then
-      IO:debug "Skip parameters for .env files"
-    else
-      IO:print "## ${txtInfo}parameters${txtReset}:"
-      Option:filter param |
-        while read -r name; do
-          declare -p "$name" | cut -d' ' -f3-
-        done
-    fi
-  fi
-
-  if [[ -n $(Option:filter choice) ]]; then
-    if ((piped)); then
-      IO:debug "Skip choices for .env files"
-    else
-      IO:print "## ${txtInfo}choice${txtReset}:"
-      Option:filter choice |
-        while read -r name; do
-          declare -p "$name" | cut -d' ' -f3-
-        done
-    fi
-  fi
-
-  IO:print "## ${txtInfo}required commands${txtReset}:"
-  Script:show_required
-}
-
-Option:usage() {
-  IO:print "Program : ${txtInfo}$script_basename${txtReset}  by ${txtWarn}$script_author${txtReset}"
-  IO:print "Version : ${txtInfo}v$script_version${txtReset} (${txtWarn}$script_modified${txtReset})"
-  IO:print "Purpose : ${txtInfo}$script_description${txtReset}"
-  echo -n "Usage   : $script_basename"
-  Option:config |
-    awk '
-  BEGIN { FS="|"; OFS=" "; oneline="" ; fulltext="Flags, options and parameters:"}
-  $1 ~ /flag/  {
-    fulltext = fulltext sprintf("\n    -%1s|--%-12s: [flag] %s [default: off]",$2,$3,$4) ;
-    oneline  = oneline " [-" $2 "]"
-    }
-  $1 ~ /option/  {
-    fulltext = fulltext sprintf("\n    -%1s|--%-12s: [option] %s",$2,$3 " <?>",$4) ;
-    if($5!=""){fulltext = fulltext "  [default: " $5 "]"; }
-    oneline  = oneline " [-" $2 " <" $3 ">]"
-    }
-  $1 ~ /list/  {
-    fulltext = fulltext sprintf("\n    -%1s|--%-12s: [list] %s (array)",$2,$3 " <?>",$4) ;
-    fulltext = fulltext "  [default empty]";
-    oneline  = oneline " [-" $2 " <" $3 ">]"
-    }
-  $1 ~ /secret/  {
-    fulltext = fulltext sprintf("\n    -%1s|--%s <%s>: [secret] %s",$2,$3,"?",$4) ;
-      oneline  = oneline " [-" $2 " <" $3 ">]"
-    }
-  $1 ~ /param/ {
-    if($2 == "1"){
-          fulltext = fulltext sprintf("\n    %-17s: [parameter] %s","<"$3">",$4);
-          oneline  = oneline " <" $3 ">"
-     }
-     if($2 == "?"){
-          fulltext = fulltext sprintf("\n    %-17s: [parameter] %s (optional)","<"$3">",$4);
-          oneline  = oneline " <" $3 "?>"
-     }
-     if($2 == "n"){
-          fulltext = fulltext sprintf("\n    %-17s: [parameters] %s (1 or more)","<"$3">",$4);
-          oneline  = oneline " <" $3 " …>"
-     }
-    }
-  $1 ~ /choice/ {
-        fulltext = fulltext sprintf("\n    %-17s: [choice] %s","<"$3">",$4);
-        if($5!=""){fulltext = fulltext "  [options: " $5 "]"; }
-        oneline  = oneline " <" $3 ">"
-    }
-    END {print oneline; print fulltext}
-  '
-}
-
-function Option:filter() {
-  Option:config | grep "$1|" | cut -d'|' -f3 | sort | grep -v '^\s*$'
-}
-
-function Script:show_required() {
-  grep 'Os:require' "$script_install_path" |
-    grep -v -E '\(\)|grep|#\s*Os:require' |
-    awk -v install="# $install_package " '
-    function ltrim(s) { sub(/^[ "\t\r\n]+/, "", s); return s }
-    function rtrim(s) { sub(/[ "\t\r\n]+$/, "", s); return s }
-    function trim(s) { return rtrim(ltrim(s)); }
-    NF == 2 {print install trim($2); }
-    NF == 3 {print install trim($3); }
-    NF > 3  {$1=""; $2=""; $0=trim($0); print "# " trim($0);}
-  ' |
-    sort -u
-}
-
-function Option:initialize() {
-  local init_command
-  init_command=$(Option:config |
-    grep -v "VERBOSE|" |
-    awk '
-    BEGIN { FS="|"; OFS=" ";}
-    $1 ~ /flag/   && $5 == "" {print $3 "=0; "}
-    $1 ~ /flag/   && $5 != "" {print $3 "=\"" $5 "\"; "}
-    $1 ~ /option/ && $5 == "" {print $3 "=\"\"; "}
-    $1 ~ /option/ && $5 != "" {print $3 "=\"" $5 "\"; "}
-    $1 ~ /choice/   {print $3 "=\"\"; "}
-    $1 ~ /list/     {print $3 "=(); "}
-    $1 ~ /secret/   {print $3 "=\"\"; "}
-    ')
-  if [[ -n "$init_command" ]]; then
-    eval "$init_command"
-  fi
-}
-
-function Option:has_single() { Option:config | grep 'param|1|' >/dev/null; }
-function Option:has_choice() { Option:config | grep 'choice|1' >/dev/null; }
-function Option:has_optional() { Option:config | grep 'param|?|' >/dev/null; }
-function Option:has_multi() { Option:config | grep 'param|n|' >/dev/null; }
-
-function Option:parse() {
-  if [[ $# -eq 0 ]]; then
-    Option:usage >&2
-    Script:exit
-  fi
-
-  ## first process all the -x --xxxx flags and options
-  while true; do
-    # flag <flag> is saved as $flag = 0/1
-    # option <option> is saved as $option
-    if [[ $# -eq 0 ]]; then
-      ## all parameters processed
-      break
-    fi
-    if [[ ! $1 == -?* ]]; then
-      ## all flags/options processed
-      break
-    fi
-    local save_option
-    save_option=$(Option:config |
-      awk -v opt="$1" '
-        BEGIN { FS="|"; OFS=" ";}
-        $1 ~ /flag/   &&  "-"$2 == opt {print $3"=1"}
-        $1 ~ /flag/   && "--"$3 == opt {print $3"=1"}
-        $1 ~ /option/ &&  "-"$2 == opt {print $3"=${2:-}; shift"}
-        $1 ~ /option/ && "--"$3 == opt {print $3"=${2:-}; shift"}
-        $1 ~ /list/ &&  "-"$2 == opt {print $3"+=(${2:-}); shift"}
-        $1 ~ /list/ && "--"$3 == opt {print $3"=(${2:-}); shift"}
-        $1 ~ /secret/ &&  "-"$2 == opt {print $3"=${2:-}; shift #noshow"}
-        $1 ~ /secret/ && "--"$3 == opt {print $3"=${2:-}; shift #noshow"}
-        ')
-    if [[ -n "$save_option" ]]; then
-      if echo "$save_option" | grep shift >>/dev/null; then
-        local save_var
-        save_var=$(echo "$save_option" | cut -d= -f1)
-        IO:debug "$config_icon parameter: ${save_var}=$2"
-      else
-        IO:debug "$config_icon flag: $save_option"
-      fi
-      eval "$save_option"
-    else
-      IO:die "cannot interpret option [$1]"
-    fi
-    shift
-  done
-
-  ((help)) && (
-    Option:usage
-    Script:check_version
-    IO:print "                                  "
-    echo "### TIPS & EXAMPLES"
-    Script:show_tips
-
-  ) && Script:exit
-
-  local option_list
-  local option_count
-  local choices
-  local single_params
-  ## then run through the given parameters
-  if Option:has_choice; then
-    choices=$(Option:config | awk -F"|" '
-      $1 == "choice" && $2 == 1 {print $3}
-      ')
-    option_list=$(xargs <<<"$choices")
-    option_count=$(wc <<<"$choices" -w | xargs)
-    IO:debug "$config_icon Expect : $option_count choice(s): $option_list"
-    [[ $# -eq 0 ]] && IO:die "need the choice(s) [$option_list]"
-
-    local choices_list
-    local valid_choice
-    local param
-    for param in $choices; do
-      [[ $# -eq 0 ]] && IO:die "need choice [$param]"
-      [[ -z "$1" ]] && IO:die "need choice [$param]"
-      IO:debug "$config_icon Assign : $param=$1"
-      # check if choice is in list
-      choices_list=$(Option:config | awk -F"|" -v choice="$param" '$1 == "choice" && $3 = choice {print $5}')
-      valid_choice=$(tr <<<"$choices_list" "," "\n" | grep "$1")
-      [[ -z "$valid_choice" ]] && IO:die "choice [$1] is not valid, should be in list [$choices_list]"
-
-      eval "$param=\"$1\""
-      shift
-    done
-  else
-    IO:debug "$config_icon No choices to process"
-    choices=""
-    option_count=0
-  fi
-
-  if Option:has_single; then
-    single_params=$(Option:config | awk -F"|" '
-      $1 == "param" && $2 == 1 {print $3}
-      ')
-    option_list=$(xargs <<<"$single_params")
-    option_count=$(wc <<<"$single_params" -w | xargs)
-    IO:debug "$config_icon Expect : $option_count single parameter(s): $option_list"
-    [[ $# -eq 0 ]] && IO:die "need the parameter(s) [$option_list]"
-
-    for param in $single_params; do
-      [[ $# -eq 0 ]] && IO:die "need parameter [$param]"
-      [[ -z "$1" ]] && IO:die "need parameter [$param]"
-      IO:debug "$config_icon Assign : $param=$1"
-      eval "$param=\"$1\""
-      shift
-    done
-  else
-    IO:debug "$config_icon No single params to process"
-    single_params=""
-    option_count=0
-  fi
-
-  if Option:has_optional; then
-    local optional_params
-    local optional_count
-    optional_params=$(Option:config | grep 'param|?|' | cut -d'|' -f3)
-    optional_count=$(wc <<<"$optional_params" -w | xargs)
-    IO:debug "$config_icon Expect : $optional_count optional parameter(s): $(echo "$optional_params" | xargs)"
-
-    for param in $optional_params; do
-      IO:debug "$config_icon Assign : $param=${1:-}"
-      eval "$param=\"${1:-}\""
-      shift
-    done
-  else
-    IO:debug "$config_icon No optional params to process"
-    optional_params=""
-    optional_count=0
-  fi
-
-  if Option:has_multi; then
-    #IO:debug "Process: multi param"
-    local multi_count
-    local multi_param
-    multi_count=$(Option:config | grep -c 'param|n|')
-    multi_param=$(Option:config | grep 'param|n|' | cut -d'|' -f3)
-    IO:debug "$config_icon Expect : $multi_count multi parameter: $multi_param"
-    ((multi_count > 1)) && IO:die "cannot have >1 'multi' parameter: [$multi_param]"
-    ((multi_count > 0)) && [[ $# -eq 0 ]] && IO:die "need the (multi) parameter [$multi_param]"
-    # save the rest of the params in the multi param
-    if [[ -n "$*" ]]; then
-      IO:debug "$config_icon Assign : $multi_param=$*"
-      eval "$multi_param=( $* )"
-    fi
-  else
-    multi_count=0
-    multi_param=""
-    [[ $# -gt 0 ]] && IO:die "cannot interpret extra parameters"
-  fi
-}
-
-function Os:require() {
-  local install_instructions
-  local binary
-  local words
-  local path_binary
-  # $1 = binary that is required
-  binary="$1"
-  path_binary=$(command -v "$binary" 2>/dev/null)
-  [[ -n "$path_binary" ]] && IO:debug "️$require_icon required [$binary] -> $path_binary" && return 0
-  # $2 = how to install it
-  IO:alert "$script_basename needs [$binary] but it cannot be found"
-  words=$(echo "${2:-}" | wc -w)
-  install_instructions="$install_package $1"
-  [[ $words -eq 1 ]] && install_instructions="$install_package $2"
-  [[ $words -gt 1 ]] && install_instructions="${2:-}"
-  if ((FORCE)); then
-    IO:announce "Installing [$1] ..."
-    eval "$install_instructions"
-  else
-    IO:alert "1) install package  : $install_instructions"
-    IO:alert "2) check path       : export PATH=\"[path of your binary]:\$PATH\""
-    IO:die "Missing program/script [$binary]"
-  fi
-}
-
-function Os:folder() {
-  if [[ -n "$1" ]]; then
-    local folder="$1"
-    local max_days=${2:-365}
-    if [[ ! -d "$folder" ]]; then
-      IO:debug "$clean_icon Create folder : [$folder]"
-      mkdir -p "$folder"
-    else
-      IO:debug "$clean_icon Cleanup folder: [$folder] - delete files older than $max_days day(s)"
-      find "$folder" -mtime "+$max_days" -type f -exec rm {} \;
-    fi
-  fi
-}
-
-function Os:follow_link() {
-  [[ ! -L "$1" ]] && echo "$1" && return 0 ## if it's not a symbolic link, return immediately
-  local file_folder link_folder link_name symlink
-  file_folder="$(dirname "$1")"                                                                                   ## check if file has absolute/relative/no path
-  [[ "$file_folder" != /* ]] && file_folder="$(cd -P "$file_folder" &>/dev/null && pwd)"                          ## a relative path was given, resolve it
-  symlink=$(readlink "$1")                                                                                        ## follow the link
-  link_folder=$(dirname "$symlink")                                                                               ## check if link has absolute/relative/no path
-  [[ -z "$link_folder" ]] && link_folder="$file_folder"                                                           ## if no link path, stay in same folder
-  [[ "$link_folder" == \.* ]] && link_folder="$(cd -P "$file_folder" && cd -P "$link_folder" &>/dev/null && pwd)" ## a relative link path was given, resolve it
-  link_name=$(basename "$symlink")
-  IO:debug "$info_icon Symbolic ln: $1 -> [$link_folder/$link_name]"
-  Os:follow_link "$link_folder/$link_name" ## recurse
-}
-
-function Os:notify() {
-  # cf https://levelup.gitconnected.com/5-modern-bash-scripting-techniques-that-only-a-few-programmers-know-4abb58ddadad
-  local message="$1"
-  local source="${2:-$script_basename}"
-
-  [[ -n $(command -v notify-send) ]] && notify-send "$source" "$message"                                      # for Linux
-  [[ -n $(command -v osascript) ]] && osascript -e "display notification \"$message\" with title \"$source\"" # for MacOS
-}
-
-function Os:busy() {
-  # show spinner as long as process $pid is running
-  local pid="$1"
-  local message="${2:-}"
-  local frames=("|" "/" "-" "\\")
-  (
-    while kill -0 "$pid" &>/dev/null; do
-      for frame in "${frames[@]}"; do
-        printf "\r[ $frame ] %s..." "$message"
-        sleep 0.5
-      done
-    done
-    printf "\n"
-  )
-}
-
-function Os:beep() {
-  if [[ -n "$TERM" ]]; then
-    tput bel
-  fi
-}
-
-function Script:meta() {
-
-  script_prefix=$(basename "${BASH_SOURCE[0]}" .sh)
-  script_basename=$(basename "${BASH_SOURCE[0]}")
-  execution_day=$(date "+%Y-%m-%d")
-
-  script_install_path="${BASH_SOURCE[0]}"
-  IO:debug "$info_icon Script path: $script_install_path"
-  script_install_path=$(Os:follow_link "$script_install_path")
-  IO:debug "$info_icon Linked path: $script_install_path"
-  script_install_folder="$(cd -P "$(dirname "$script_install_path")" && pwd)"
-  IO:debug "$info_icon In folder  : $script_install_folder"
-  if [[ -f "$script_install_path" ]]; then
-    script_hash=$(Str:digest <"$script_install_path" 8)
-    script_lines=$(awk <"$script_install_path" 'END {print NR}')
-  fi
-
-  # get shell/operating system/versions
-  shell_brand="sh"
-  shell_version="?"
-  [[ -n "${ZSH_VERSION:-}" ]] && shell_brand="zsh" && shell_version="$ZSH_VERSION"
-  [[ -n "${BASH_VERSION:-}" ]] && shell_brand="bash" && shell_version="$BASH_VERSION"
-  [[ -n "${FISH_VERSION:-}" ]] && shell_brand="fish" && shell_version="$FISH_VERSION"
-  [[ -n "${KSH_VERSION:-}" ]] && shell_brand="ksh" && shell_version="$KSH_VERSION"
-  IO:debug "$info_icon Shell type : $shell_brand - version $shell_version"
-  if [[ "$shell_brand" == "bash" && "${BASH_VERSINFO:-0}" -lt 4 ]]; then
-    IO:die "Bash version 4 or higher is required - current version = ${BASH_VERSINFO:-0}"
-  fi
-
-  os_kernel=$(uname -s)
-  os_version=$(uname -r)
-  os_machine=$(uname -m)
-  install_package=""
-  case "$os_kernel" in
-  CYGWIN* | MSYS* | MINGW*)
-    os_name="Windows"
-    ;;
-  Darwin)
-    os_name=$(sw_vers -productName)       # macOS
-    os_version=$(sw_vers -productVersion) # 11.1
-    install_package="brew install"
-    ;;
-  Linux | GNU*)
-    if [[ $(command -v lsb_release) ]]; then
-      # 'normal' Linux distributions
-      os_name=$(lsb_release -i | awk -F: '{$1=""; gsub(/^[\s\t]+/,"",$2); gsub(/[\s\t]+$/,"",$2); print $2}')    # Ubuntu/Raspbian
-      os_version=$(lsb_release -r | awk -F: '{$1=""; gsub(/^[\s\t]+/,"",$2); gsub(/[\s\t]+$/,"",$2); print $2}') # 20.04
-    else
-      # Synology, QNAP,
-      os_name="Linux"
-    fi
-    [[ -x /bin/apt-cyg ]] && install_package="apt-cyg install"     # Cygwin
-    [[ -x /bin/dpkg ]] && install_package="dpkg -i"                # Synology
-    [[ -x /opt/bin/ipkg ]] && install_package="ipkg install"       # Synology
-    [[ -x /usr/sbin/pkg ]] && install_package="pkg install"        # BSD
-    [[ -x /usr/bin/pacman ]] && install_package="pacman -S"        # Arch Linux
-    [[ -x /usr/bin/zypper ]] && install_package="zypper install"   # Suse Linux
-    [[ -x /usr/bin/emerge ]] && install_package="emerge"           # Gentoo
-    [[ -x /usr/bin/yum ]] && install_package="yum install"         # RedHat RHEL/CentOS/Fedora
-    [[ -x /usr/bin/apk ]] && install_package="apk add"             # Alpine
-    [[ -x /usr/bin/apt-get ]] && install_package="apt-get install" # Debian
-    [[ -x /usr/bin/apt ]] && install_package="apt install"         # Ubuntu
-    ;;
-
-  esac
-  IO:debug "$info_icon System OS  : $os_name ($os_kernel) $os_version on $os_machine"
-  IO:debug "$info_icon Package mgt: $install_package"
-
-  # get last modified date of this script
-  script_modified="??"
-  [[ "$os_kernel" == "Linux" ]] && script_modified=$(stat -c %y "$script_install_path" 2>/dev/null | cut -c1-16) # generic linux
-  [[ "$os_kernel" == "Darwin" ]] && script_modified=$(stat -f "%Sm" "$script_install_path" 2>/dev/null)          # for MacOS
-
-  IO:debug "$info_icon Version  : $script_version"
-  IO:debug "$info_icon Created  : $script_created"
-  IO:debug "$info_icon Modified : $script_modified"
-
-  IO:debug "$info_icon Lines    : $script_lines lines / md5: $script_hash"
-  IO:debug "$info_icon User     : $USER@$HOSTNAME"
-
-  # if run inside a git repo, detect for which remote repo it is
-  if git status &>/dev/null; then
-    git_repo_remote=$(git remote -v | awk '/(fetch)/ {print $2}')
-    IO:debug "$info_icon git remote : $git_repo_remote"
-    git_repo_root=$(git rev-parse --show-toplevel)
-    IO:debug "$info_icon git folder : $git_repo_root"
-  fi
-
-  # get script version from VERSION.md file - which is automatically updated by pforret/setver
-  [[ -f "$script_install_folder/VERSION.md" ]] && script_version=$(cat "$script_install_folder/VERSION.md")
-  # get script version from git tag file - which is automatically updated by pforret/setver
-  [[ -n "$git_repo_root" ]] && [[ -n "$(git tag &>/dev/null)" ]] && script_version=$(git tag --sort=version:refname | tail -1)
-}
-
-function Script:initialize() {
-  log_file=""
-  if [[ -n "${TMP_DIR:-}" ]]; then
-    # clean up TMP folder after 1 day
-    Os:folder "$TMP_DIR" 1
-  fi
-  if [[ -n "${LOG_DIR:-}" ]]; then
-    # clean up LOG folder after 1 month
-    Os:folder "$LOG_DIR" 30
-    log_file="$LOG_DIR/$script_prefix.$execution_day.log"
-    IO:debug "$config_icon log_file: $log_file"
-  fi
-}
-
-function Os:tempfile() {
-  local extension=${1:-txt}
-  local file="${TMP_DIR:-/tmp}/$execution_day.$RANDOM.$extension"
-  IO:debug "$config_icon tmp_file: $file"
-  temp_files+=("$file")
-  echo "$file"
-}
-
-function Os:import_env() {
-  local env_files
-  if [[ $(pwd) == "$script_install_folder" ]]; then
-    env_files=(
-      "$script_install_folder/.env"
-      "$script_install_folder/.$script_prefix.env"
-      "$script_install_folder/$script_prefix.env"
-    )
-  else
-    env_files=(
-      "$script_install_folder/.env"
-      "$script_install_folder/.$script_prefix.env"
-      "$script_install_folder/$script_prefix.env"
-      "./.env"
-      "./.$script_prefix.env"
-      "./$script_prefix.env"
-    )
-  fi
-
-  local env_file
-  for env_file in "${env_files[@]}"; do
-    if [[ -f "$env_file" ]]; then
-      IO:debug "$config_icon Read  dotenv: [$env_file]"
-      local clean_file
-      clean_file=$(Os:clean_env "$env_file")
-      # shellcheck disable=SC1090
-      source "$clean_file" && rm "$clean_file"
-    fi
-  done
-}
-
-function Os:clean_env() {
-  local input="$1"
-  local output="$1.__.sh"
-  [[ ! -f "$input" ]] && IO:die "Input file [$input] does not exist"
-  IO:debug "$clean_icon Clean dotenv: [$output]"
-  awk <"$input" '
-      function ltrim(s) { sub(/^[ \t\r\n]+/, "", s); return s }
-      function rtrim(s) { sub(/[ \t\r\n]+$/, "", s); return s }
-      function trim(s) { return rtrim(ltrim(s)); }
-      /=/ { # skip lines with no equation
-        $0=trim($0);
-        if(substr($0,1,1) != "#"){ # skip comments
-          equal=index($0, "=");
-          key=trim(substr($0,1,equal-1));
-          val=trim(substr($0,equal+1));
-          if(match(val,/^".*"$/) || match(val,/^\047.*\047$/)){
-            print key "=" val
-          } else {
-            print key "=\"" val "\""
-          }
-        }
-      }
-  ' >"$output"
-  echo "$output"
-}
-
-IO:initialize # output settings
-Script:meta   # find installation folder
-
-[[ $run_as_root == 1 ]] && [[ $UID -ne 0 ]] && IO:die "user is $USER, MUST be root to run [$script_basename]"
-[[ $run_as_root == -1 ]] && [[ $UID -eq 0 ]] && IO:die "user is $USER, CANNOT be root to run [$script_basename]"
-
-Option:initialize # set default values for flags & options
-Os:import_env     # load .env, .<prefix>.env, <prefix>.env (script folder + cwd)
-
-if [[ $sourced -eq 0 ]]; then
-  Option:parse "$@" # overwrite with specified options if any
-  Script:initialize # clean up folders
-  Script:main       # run Script:main program
-  Script:exit       # exit and clean up
-else
-  # just disable the trap, don't execute Script:main
-  trap - INT TERM EXIT
+function _run_step_0() {
+	Mbs:Io:print "First init pass"
+
+	# APT - update
+	Mbs:Io:printSep
+	Mbs:Io:print "Updating packages"
+	apt -y update
+	apt -y upgrade
+	echo "Packages updated"
+
+	# Journal - limit size
+	if Mbs:Var:isTrue "$LI__JOURNAL_LIMIT__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.journal-limit.sh]
+
+		Mbs:LinuxInit:limitJournal() {
+			# Defaults
+			local config_journal_system_max_default="1024M"
+			local config_journal_file_max_default="100M"
+			# Dirs
+			local journal_conf_d="/etc/systemd/journald.conf.d"
+			local journal_conf_f="${journal_conf_d}/size.conf"
+
+			# Apply default if conf is not found
+			local system_max="${LI__JOURNAL_LIMIT__SYSTEM_MAX:=$config_journal_system_max_default}"
+			local file_max="${LI__JOURNAL_LIMIT__FILE_MAX:=$config_journal_file_max_default}"
+
+			Mbs:Io:print "Limit journal size"
+			mkdir -p "$journal_conf_d"
+			Mbs:Io:print "Using SystemMaxUse=$system_max | SystemMaxFileSize=$file_max"
+			echo -e "[Journal]\nSystemMaxUse=$system_max\nSystemMaxFileSize=$file_max" | tee "$journal_conf_f" >/dev/null
+			Mbs:Io:print "New conf file is located at $journal_conf_f"
+			Mbs:Io:print "Journal size limited"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.journal-limit.sh]
+		Mbs:LinuxInit:limitJournal || Mbs:Script:die "Failed to limit journal size"
+	fi
+
+	# RAM - set swappiness
+	if Mbs:Var:isTrue "$LI__RAM_SWAPPINESS__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.swappiness.sh]
+
+		Mbs:LinuxInit:setSwappiness() {
+			# Defaults
+			local swappiness_default=60
+			# Dirs
+			local swappiness_conf_f="/etc/sysctl.d/swappiness.conf"
+			# Apply default if conf is not found
+			local swappiness="${LI__RAM_SWAPPINESS__VALUE:=$swappiness_default}"
+
+			Mbs:Io:print "Setting custom swappiness"
+			Mbs:Io:print "New swappiness value: $swappiness"
+			echo "vm.swappiness=$swappiness" | tee "$swappiness_conf_f" >/dev/null
+			Mbs:Io:print "Custom swappiness set, it will be applied from the next reboot"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.swappiness.sh]
+		Mbs:LinuxInit:setSwappiness || Mbs:Script:die "Failed to set swappiness"
+	fi
+
+	# APT - add Docker repo
+	if Mbs:Var:isTrue "$LI__ADD_DOCKER_APT_REPO__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.apt-add-docker-repo.sh]
+
+		Mbs:LinuxInit:aptAddDockerRepo() {
+			Mbs:Io:print "Add Docker repo to APT"
+
+			local docker_gpg_f="/etc/apt/keyrings/docker.asc"
+			local docker_list_f="/etc/apt/sources.list.d/docker.list"
+
+			# Add Docker's official GPG key
+			if [ ! -f "$docker_gpg_f" ]; then
+				apt update
+				apt install ca-certificates curl
+				install -m 0755 -d /etc/apt/keyrings
+				curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o "${docker_gpg_f}"
+				chmod a+r "${docker_gpg_f}"
+			else
+				Mbs:Io:print "Docker repo GPG key already added"
+			fi
+
+			# Add the repository to Apt sources
+			if [ ! -f "$docker_list_f" ]; then
+				echo \
+					"deb [arch=$(dpkg --print-architecture) signed-by=$docker_gpg_f] \
+        https://download.docker.com/linux/ubuntu \
+        $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+					| tee "${docker_list_f}" >/dev/null
+				apt update
+			else
+				Mbs:Io:print "Docker repo already added"
+			fi
+
+			Mbs:Io:print "Docker APT repo added and configured"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.apt-add-docker-repo.sh]
+		Mbs:LinuxInit:aptAddDockerRepo || Mbs:Script:die "Failed to add Docker APT repo"
+	fi
+
+	# APT - install packages
+	if Mbs:Var:isTrue "$LI__APT_INSTALL_PACKAGES__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.apt-install-pkgs.sh]
+
+		Mbs:LinuxInit:installAptPackages() {
+			declare -a config_pkgs_arr
+			Mbs:Io:print "Installing new packages"
+
+			if Mbs:Var:isEmpty "$LI__APT_INSTALL_PACKAGES__PACKAGES"; then
+				Mbs:Io:print "LI__APT_INSTALL_PACKAGES__PACKAGES unset or empty"
+				Mbs:Io:print "Please input one or more space separated APT packages to install, then press enter to confirm:"
+				read -r -a config_pkgs_arr
+				Mbs:Io:print ""
+			else
+				readarray -td, config_pkgs_arr <<<"$LI__APT_INSTALL_PACKAGES__PACKAGES,"
+				unset 'config_pkgs_arr[-1]'
+			fi
+
+			Mbs:Io:print "New packages to install: ${config_pkgs_arr[*]}"
+			apt -y install "${config_pkgs_arr[@]}"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.apt-install-pkgs.sh]
+		Mbs:LinuxInit:installAptPackages || Mbs:Script:die "Failed to install APT packages"
+	fi
+
+	# User - add to groups
+	if Mbs:Var:isTrue "$LI__USER_ADD_TO_GROUPS__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.user-groups.sh]
+
+		Mbs:LinuxInit:addUserToGroups() {
+			Mbs:Io:print "Adding user to groups"
+
+			Mbs:Var:isSet "LI__USER" || return 1
+			Mbs:Var:isSet "LI__USER_ADD_TO_GROUPS__GROUPS" || return 1
+
+			Mbs:Io:print "Adding $LI__USER to $LI__USER_ADD_TO_GROUPS__GROUPS groups"
+			usermod -aG "$LI__USER_ADD_TO_GROUPS__GROUPS" "$LI__USER"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.user-groups.sh]
+		Mbs:LinuxInit:addUserToGroups || Mbs:Script:die "Failed to add user to groups"
+	fi
+
+	# User - sudo without password
+	if Mbs:Var:isTrue "$LI__PASSWORDLESS_SUDO__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.user-passwordless-sudo.sh]
+
+		Mbs:LinuxInit:enablePasswordlessSudo() {
+			Mbs:Io:print "Setting sudo without password"
+
+			if Mbs:Var:isEmpty "$LI__USER"; then
+				Mbs:Io:print "Missing LI__USER, please enter the normal user name and press enter: "
+				read -r
+				LI__USER="$REPLY"
+			fi
+
+			if ! Mbs:User:isNormal "$LI__USER"; then
+				Mbs:Io:error "LI__USER problem, it must be set, it must be a normal user, it must exists"
+				return 1
+			fi
+
+			Mbs:Io:print "New super-uber-user: $LI__USER"
+
+			local sudoers_f="/etc/sudoers.d/99-$LI__USER"
+
+			if [ -f "$sudoers_f" ]; then
+				Mbs:Io:print "$sudoers_f file already exists, please check"
+				return 0
+			fi
+
+			echo "$LI__USER ALL=(ALL) NOPASSWD: ALL" | tee "$sudoers_f" >/dev/null
+			chmod 750 "$sudoers_f"
+			Mbs:Io:print "$LI__USER can run sudo without password from the next boot."
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.user-passwordless-sudo.sh]
+		Mbs:LinuxInit:enablePasswordlessSudo || Mbs:Script:die "Failed to enable passwordless sudo"
+	fi
+
+	# Nano - enable syntax highlighting
+	if Mbs:Var:isTrue "$LI__NANO_SYNTAX_HIGHLIGHTING__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.nano-syntax-highlighting.sh]
+
+		Mbs:LinuxInit:enableNanoSyntaxHighlighting() {
+			Mbs:Io:print "Enabling Nano Syntax highlighting"
+
+			if ! Mbs:User:isNormal "$LI__USER"; then
+				Mbs:Script:die "\nLI__USER problem, it must be set, it must be a normal user, it must exists"
+			fi
+
+			if Mbs:Var:isEmpty "$home_user_d"; then
+				home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+			fi
+
+			home_root_d=$(sudo -u root sh -c 'echo $HOME')
+
+			local nano_conf_f=".nanorc"
+			local nano_conf_user_f="$home_user_d/$nano_conf_f"
+			local nano_conf_root_f="$home_root_d/$nano_conf_f"
+
+			if [ ! -f "$nano_conf_root_f" ] || ! grep -q 'include "/usr/share/nano/\*.nanorc' "$nano_conf_root_f"; then
+				echo -e 'include "/usr/share/nano/*.nanorc"\nset linenumbers' | tee -a "$nano_conf_root_f" >/dev/null
+			else
+				Mbs:Io:print "$nano_conf_root_f already configured"
+			fi
+
+			if [ ! -f "$nano_conf_user_f" ] || ! grep -q 'include "/usr/share/nano/\*.nanorc' "$nano_conf_user_f"; then
+				echo -e 'include "/usr/share/nano/*.nanorc"\nset linenumbers' | sudo -u "$LI__USER" tee -a "$nano_conf_user_f" >/dev/null
+			else
+				Mbs:Io:print "$nano_conf_user_f already configured"
+			fi
+			Mbs:Io:print "Nano Syntax highlighting enabled"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.nano-syntax-highlighting.sh]
+		Mbs:LinuxInit:enableNanoSyntaxHighlighting || Mbs:Script:die "Failed to enable nano syntax highlighting"
+	fi
+
+	# Network - enable routing
+	if Mbs:Var:isTrue "$LI__NETWORK_ROUTING__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.network-routing.sh]
+
+		Mbs:LinuxInit:enableRouting() {
+			local systctld_network_conf_f="/etc/sysctl.d/21-network_routing.conf"
+			Mbs:Io:print "Adding network confs to $systctld_network_conf_f"
+			echo "net.ipv4.ip_forward = 1" | tee "$systctld_network_conf_f" >/dev/null
+			Mbs:Io:print "Routing enabled"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.network-routing.sh]
+		Mbs:LinuxInit:enableRouting || Mbs:Script:die "Failed to enable network routing"
+	fi
+
+	# Network - enable src valid mark
+	if Mbs:Var:isTrue "$LI__NETWORK_SRC_VALID_MARK__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.network-src-valid-mark.sh]
+
+		Mbs:LinuxInit:enableNetSrcValidMark() {
+			local systctld_network_conf_f="/etc/sysctl.d/22-network_src_valid_mark.conf"
+			Mbs:Io:print "\n\nAdding network confs to $systctld_network_conf_f"
+			echo "net.ipv4.conf.all.src_valid_mark = 1" | tee "$systctld_network_conf_f" >/dev/null
+			Mbs:Io:print "Network src valid mark enabled"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.network-src-valid-mark.sh]
+		Mbs:LinuxInit:enableNetSrcValidMark || Mbs:Script:die "Failed to enable network src valid mark"
+	fi
+
+	# SSH - prepare
+	Mbs:Io:printSep
+	#region Bundler import [linux-init.mod/s0.ssh-prepare.sh]
+
+	Mbs:LinuxInit:prepareSSH() {
+		Mbs:Io:print "Adding .ssh folders and basic files"
+
+		if Mbs:Var:isEmpty "$LI__USER"; then
+			Mbs:Io:print "Missing LI__USER, please enter the normal user name and press enter\n"
+			read -r
+			LI__USER="$REPLY"
+		fi
+
+		if ! Mbs:User:isNormal "$LI__USER"; then
+			Mbs:Io:error "LI__USER problem, it must be set, it must be a normal user, it must exists"
+			return 1
+		fi
+
+		if Mbs:Var:isEmpty "$home_user_d"; then
+			home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+		fi
+
+		local ssh_user_d="$home_user_d/.ssh"
+		export ssh_auth_keys_user_f="$ssh_user_d/authorized_keys"
+		export ssh_known_hosts_user_f="$ssh_user_d/known_hosts"
+
+		sudo -u "$LI__USER" mkdir -p "$ssh_user_d"
+		sudo -u "$LI__USER" touch "$ssh_auth_keys_user_f" "$ssh_known_hosts_user_f"
+		chmod 700 "$ssh_user_d"
+		chmod 600 "$ssh_auth_keys_user_f" "$ssh_known_hosts_user_f"
+		Mbs:Io:print ".ssh folders and basic files added"
+		return 0
+	}
+	#endregion Bundler import [linux-init.mod/s0.ssh-prepare.sh]
+	Mbs:LinuxInit:prepareSSH || Mbs:Script:die "Failed to prepare SSH"
+
+	# Services - docker
+	if Mbs:Var:isTrue "$LI__SRV_DOCKER_ENABLER__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.docker-service-enabler.sh]
+
+		Mbs:LinuxInit:enableDockerService() {
+			Mbs:Io:print "Enabling Docker services"
+
+			if ! Mbs:LinuxInit:enableService "docker.service" false; then
+				Mbs:Io:error "Failed to enable docker service"
+				return 1
+			fi
+
+			if ! Mbs:Os:enableService "containerd.service" false; then
+				Mbs:Io:error "Failed to enable containerd service"
+				return 1
+			fi
+
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.docker-service-enabler.sh]
+		Mbs:LinuxInit:enableDockerService || Mbs:Script:die "Failed to enable Docker services"
+	fi
+
+	# Git - config
+	if Mbs:Var:isTrue "$LI__GIT_CONFIG__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.git-config.sh]
+
+		Mbs:LinuxInit:configGit() {
+			Mbs:Io:print "Configuring basic Git settings"
+
+			if ! Mbs:User:isNormal "$LI__USER"; then
+				Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+			fi
+
+			sudo -u "$LI__USER" sh -c "git config --global user.name \"$LI__GIT_CONFIG__USERNAME\""
+			sudo -u "$LI__USER" sh -c "git config --global user.email \"$LI__GIT_CONFIG__EMAIL\""
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.git-config.sh]
+		Mbs:LinuxInit:configGit || Mbs:Script:die "Failed to configure Git"
+	fi
+
+	# Install oh-my-posh
+	if Mbs:Var:isTrue "$LI__INSTALL_OH_MY_POSH__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.install-oh-my-posh.sh]
+
+		Mbs:LinuxInit:installOhMyPosh() {
+			Mbs:Io:print "Installing oh-my-posh"
+
+			if ! Mbs:User:isNormal "$LI__USER"; then
+				Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+			fi
+
+			sudo -u "$LI__USER" bash -c "curl -s https://ohmyposh.dev/install.sh | bash -s"
+
+			if Mbs:Var:isEmpty "$home_user_d"; then
+				home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+			fi
+
+			local profile_user_f="$home_user_d/.profile"
+
+			if [ ! -f "$profile_user_f" ] || ! grep -q 'oh-my-posh' "$profile_user_f"; then
+				local user_default_shell
+				user_default_shell=$(awk -F: -v user="$LI__USER" '$1 == user {print $NF}' /etc/passwd)
+
+				sudo -u "$LI__USER" "$user_default_shell" -c 'export PATH=$PATH:$HOME/.local/bin; oh-my-posh font install meslo'
+
+				local omp_shell
+				omp_shell=$(sudo -u "$LI__USER" "$user_default_shell" -c 'export PATH=$PATH:$HOME/.local/bin; oh-my-posh get shell; echo $SHELL 2>&1 > /dev/null')
+
+				sudo -u "$LI__USER" bash -c "wget https://raw.githubusercontent.com/Nick2bad4u/OhMyPosh-Atomic-Enhanced/main/OhMyPosh-Atomic-Custom-ExperimentalDividers.json -O $home_user_d/.omp.json"
+
+				cat <<EOF >>"$profile_user_f"
+if [ -n "\$DISPLAY" ] || [ -n "\$WAYLAND_DISPLAY" ] || [ "\$TERM" = "xterm-256color" ]; then
+    eval \"\$(oh-my-posh init $omp_shell --config $home_user_d/.omp.json)\""
 fi
+EOF
 
-#endregion
+				Mbs:Io:print "oh-my-posh installed"
+			else
+				Mbs:Io:print "$profile_user_f already configured"
+			fi
+
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.install-oh-my-posh.sh]
+		Mbs:LinuxInit:installOhMyPosh || Mbs:Script:die "Failed to install oh-my-posh"
+	fi
+
+	# Install SOPS
+	if Mbs:Var:isTrue "$LI__INSTALL_SOPS__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.install-sops.sh]
+
+		Mbs:LinuxInit:installSops() {
+			Mbs:Io:print "Installing sops"
+
+			local sops_version
+			local pc_arch
+
+			case "$(uname -m)" in
+			x86_64 | amd64)
+				pc_arch=amd64
+				;;
+			aarch64 | arm64)
+				pc_arch=arm64
+				;;
+			*)
+				Mbs:Io:error "Unsupported architecture: $(uname -m)"
+				return 1
+				;;
+			esac
+
+			# Get latest SOPS version from GitHub releases
+			sops_version=$(curl -fsSL https://api.github.com/repos/getsops/sops/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+')
+			if [ -z "$sops_version" ]; then
+				Mbs:Io:error "Unable to detect latest sops version"
+				return 1
+			fi
+
+			curl -L --output sops "https://github.com/getsops/sops/releases/download/${sops_version}/sops-${sops_version}.linux.${pc_arch}"
+			mv -f sops /usr/local/bin/sops
+			chmod +x /usr/local/bin/sops
+
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.install-sops.sh]
+		Mbs:LinuxInit:installSops || Mbs:Script:die "Failed to install SOPS"
+	fi
+
+	# Prep Komodo
+	if Mbs:Var:isTrue "$LI__KOMODO_PREP__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s0.komodo-prep.sh]
+
+		Mbs:LinuxInit:komodoPrep() {
+			Mbs:Io:print "Prepare Komodo"
+
+			if ! Mbs:User:isNormal "$LI__USER"; then
+				Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+			fi
+
+			if Mbs:Var:isEmpty "$home_user_d"; then
+				home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+			fi
+
+			if Mbs:LinuxInit:isVarEmpty "$LI__KOMODO_PREP__SOPS_KEY"; then
+				Mbs:Script:die "LI__KOMODO_PREP__SOPS_KEY env var must be set"
+			fi
+
+			local home_root_d="$HOME"
+			local profile_root_f="$home_root_d/.profile"
+			local profile_user_f="$home_user_d/.profile"
+
+			if [ ! -f "$profile_root_f" ] || ! grep -q 'SOPS_AGE_KEY_FILE' "$profile_root_f"; then
+				echo "export SOPS_AGE_KEY_FILE=/srv/docker/age.key" >>"$profile_root_f"
+				Mbs:Io:print "Added SOPS_AGE_KEY_FILE to $profile_root_f"
+			else
+				Mbs:Io:print "$profile_root_f already configured with SOPS_AGE_KEY_FILE"
+			fi
+
+			if [ ! -f "$profile_user_f" ] || ! grep -q 'SOPS_AGE_KEY_FILE' "$profile_user_f"; then
+				sudo -u "$LI__USER" "sh" -c "echo export SOPS_AGE_KEY_FILE=/srv/docker/age.key >> \"$profile_user_f\""
+				Mbs:Io:print "Added SOPS_AGE_KEY_FILE to $profile_user_f"
+			else
+				Mbs:Io:print "$profile_user_f already configured with SOPS_AGE_KEY_FILE"
+			fi
+
+			local inst_type="${LI__KOMODO_PREP__TYPE:=komodoperiphery}"
+
+			mkdir -p "/srv/docker/stacks/$inst_type"
+			mkdir -p "/srv/docker/data/$inst_type"
+
+			echo "$LI__KOMODO_PREP__SOPS_KEY" >/srv/docker/age.key
+
+			# FIXME: Copy komodoperiphery/komodo stacks (from an encrypted zip)
+
+			chown -R "root:docker" /srv/docker
+			chmod -R g+rw /srv/docker
+
+			Mbs:Io:print "Komodo prep finished"
+
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s0.komodo-prep.sh]
+		Mbs:LinuxInit:komodoPrep || Mbs:Script:die "Failed to prep Komodo"
+	fi
+
+	# Pass 0 done
+	echo "1" | tee "$helper_f" >/dev/null
+	Mbs:Io:printSep
+	Mbs:Io:success "First part of the config done"
+	Mbs:Io:print ""
+	Mbs:Io:print "Please check sshd config using 'sudo sshd -t' command and fix any problem before rebooting"
+	Mbs:Io:print "If the command sudo sshd -t has no output the config is ok"
+	Mbs:Io:print ""
+	Mbs:Io:print "Reboot and run this script again to finalize the configuration"
+}
+
+function _run_step_1() {
+	Mbs:Io:print "Second init pass"
+
+	# Docker - login
+	if Mbs:Var:isTrue "$LI__DOCKER_LOGIN__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s1.docker-login.sh]
+
+		Mbs:LinuxInit:dockerLogin() {
+			Mbs:Io:print "Docker login"
+
+			local docker_group="docker"
+
+			if Mbs:Var:isEmpty "$home_user_d"; then
+				home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+			fi
+			local auth_f="$home_user_d/.docker/config.json"
+
+			if grep -q "index.docker.io" "$auth_f"; then
+				Mbs:Io:print "Already logged to DockerHub, skipping"
+				return 0
+			fi
+
+			Mbs:Io:print "Please prepare docker hub user and password"
+			Mbs:Io:paktc
+
+			if Mbs:Var:isEmpty "$LI__USER"; then
+				Mbs:Io:error "Missing LI__USER, please enter the normal user name and press enter"
+				read -r
+				LI__USER="$REPLY"
+			fi
+
+			if ! Mbs:User:isNormal "$LI__USER"; then
+				Mbs:Io:error "LI__USER problem, it must be set, it must be a normal user, it must exists"
+				return 1
+			fi
+
+			if ! Mbs:User:isCurrentInGroup "$LI__USER" "$docker_group"; then
+				Mbs:Io:error "LI__USER found, $LI__USER isn't in $docker_group group"
+				read -p "Do you want to add $LI__USER to $docker_group group? Y/N: " -n 1 -r
+				if [[ $REPLY =~ ^[Yy]$ ]]; then
+					usermod -aG "$docker_group" "$LI__USER"
+				else
+					Mbs:Io:error "Cannot proceed"
+					return 1
+				fi
+			fi
+
+			sudo -u "$LI__USER" docker login -u "$LI__DOCKER_LOGIN__USERNAME"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s1.docker-login.sh]
+		Mbs:LinuxInit:dockerLogin || Mbs:Script:die "Failed to login to Docker"
+	fi
+
+	# Docker - custom bridge network
+	if Mbs:Var:isTrue "$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s1.docker-custom-bridge.sh]
+
+		Mbs:LinuxInit:createCustomDockerBridgeNetwork() {
+			Mbs:Io:print "Creating Docker custom bridge network"
+
+			local docker_group="docker"
+
+			Mbs:Var:isSet "LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME" || return 1
+
+			if ! Mbs:User:isCurrentRunningAsRoot 2>/dev/null && ! Mbs:User:isCurrentInGroup "$docker_group"; then
+				Mbs:Io:error "Current user isn't in $docker_group group, cannot proceed"
+				Mbs:Io:error "Add current user to $docker_group group or run this script as root"
+				return 1
+			fi
+
+			if docker network ls | grep "$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME" 1>/dev/null 2>&1; then
+				Mbs:Io:print "Docker bridge network '$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME' already exists, skipping"
+				return 0
+			fi
+
+			docker network create "$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME"
+			Mbs:Io:print "Docker custom bridge network '$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME' created"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s1.docker-custom-bridge.sh]
+		Mbs:LinuxInit:createCustomDockerBridgeNetwork || Mbs:Script:die "Failed to create custom Docker bridge network"
+	fi
+
+	# Backup - restore
+	if Mbs:Var:isTrue "$LI__BACKUP_RESTORE__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s1.backup-restore.sh]
+
+		Mbs:LinuxInit:restoreBackup() {
+			Mbs:Io:print "Restoring backup"
+
+			Mbs:Var:isSet "LI__BACKUP_RESTORE__FILE_PATH" || return 1
+
+			if [ ! -f "$LI__BACKUP_RESTORE__FILE_PATH" ]; then
+				Mbs:Io:print "Cannot find $LI__BACKUP_RESTORE__FILE_PATH, please check"
+				return 1
+			else
+				tar --same-owner -xf "$LI__BACKUP_RESTORE__FILE_PATH" -C /
+			fi
+
+			Mbs:Io:print "Backup restored"
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s1.backup-restore.sh]
+		Mbs:LinuxInit:restoreBackup || Mbs:Script:die "Failed to restore backup"
+	fi
+
+	if Mbs:Var:isTrue "$LI__DOCKER_COMPOSE_START__IS_ENABLED"; then
+		Mbs:Io:printSep
+		#region Bundler import [linux-init.mod/s1.docker-compose-start.sh]
+
+		Mbs:LinuxInit:startDockerCompose() {
+			Mbs:Io:print "Starting docker compose"
+
+			local docker_group="docker"
+			if ! Mbs:User:isCurrentRunningAsRoot 2>/dev/null && ! Mbs:User:isCurrentInGroup "$docker_group"; then
+				Mbs:Io:error "Current user isn't in $docker_group group, cannot proceed"
+				Mbs:Io:error "Add current user to $docker_group group or run this script as root"
+				return 1
+			fi
+
+			Mbs:LinuxInit:checkConfig "LI__DOCKER_COMPOSE_START__FILE_PATH" || return 1
+
+			if [ ! -f "$LI__DOCKER_COMPOSE_START__FILE_PATH" ]; then
+				Mbs:Io:error "Cannot find $LI__DOCKER_COMPOSE_START__FILE_PATH compose file, please check"
+				Mbs:LinuxInit:paktc
+				return 1
+			fi
+
+			docker compose -f "$LI__DOCKER_COMPOSE_START__FILE_PATH" up -d
+			Mbs:Io:print "Services in $LI__DOCKER_COMPOSE_START__FILE_PATH compose file should be up and running"
+
+			return 0
+		}
+		#endregion Bundler import [linux-init.mod/s1.docker-compose-start.sh]
+		Mbs:LinuxInit:startDockerCompose || Mbs:Script:die "Failed to start Docker Compose"
+	fi
+
+	echo "2" | tee "$helper_f" >/dev/null
+	Mbs:Io:printSep
+	Mbs:Io:success "Second part of the config done"
+}
+
+# ARGC-BUILD {
+# This block was generated by argc (https://github.com/sigoden/argc).
+# Modifying it manually is not recommended
+
+_argc_run() {
+	if [[ ${1:-} == "___internal___" ]]; then
+		_argc_die "error: unsupported ___internal___ command"
+	fi
+	if [[ ${OS:-} == "Windows_NT" ]] && [[ -n ${MSYSTEM:-} ]]; then
+		set -o igncr
+	fi
+	argc__args=("$(basename "$0" .sh)" "$@")
+	argc__positionals=()
+	_argc_index=1
+	_argc_len="${#argc__args[@]}"
+	_argc_required_flag_options=()
+	_argc_required_envs=()
+	_argc_tools=()
+	_argc_parse
+	_argc_require_tools "${_argc_tools[@]}"
+	if [ -n "${argc__fn:-}" ]; then
+		$argc__fn "${argc__positionals[@]}"
+	fi
+}
+
+_argc_usage() {
+	cat <<-'EOF'
+		Init a new Linux machine.
+
+		USAGE: linux-init.sh.tmp.out <COMMAND>
+
+		COMMANDS:
+		  cfg  Create a config template.
+		  run  run Load config and init the machine.
+	EOF
+	exit
+}
+
+_argc_version() {
+	echo linux-init.sh.tmp.out 0.0.1
+	exit
+}
+
+_argc_parse() {
+	local _argc_key _argc_action
+	local _argc_subcmds="cfg, run"
+	while [[ $_argc_index -lt $_argc_len ]]; do
+		_argc_item="${argc__args[_argc_index]}"
+		_argc_key="${_argc_item%%=*}"
+		case "$_argc_key" in
+		--help | -help | -h)
+			_argc_usage
+			;;
+		--version | -version | -V)
+			_argc_version
+			;;
+		--)
+			_argc_dash="${#argc__positionals[@]}"
+			argc__positionals+=("${argc__args[@]:$((_argc_index + 1))}")
+			_argc_index=$_argc_len
+			break
+			;;
+		cfg)
+			_argc_index=$((_argc_index + 1))
+			_argc_action=_argc_parse_cfg
+			break
+			;;
+		run)
+			_argc_index=$((_argc_index + 1))
+			_argc_action=_argc_parse_run
+			break
+			;;
+		help)
+			local help_arg="${argc__args[$((_argc_index + 1))]:-}"
+			case "$help_arg" in
+			cfg)
+				_argc_usage_cfg
+				;;
+			run)
+				_argc_usage_run
+				;;
+			"")
+				_argc_usage
+				;;
+			*)
+				_argc_die "error: invalid value \`$help_arg\` for \`<command>\`"$'\n'"  [possible values: $_argc_subcmds]"
+				;;
+			esac
+			;;
+		*)
+			_argc_die 'error: `linux-init.sh.tmp.out` requires a subcommand but one was not provided'$'\n'"  [subcommands: $_argc_subcmds]"
+			;;
+		esac
+	done
+	_argc_tools=(sudo)
+	if [[ -n ${_argc_action:-} ]]; then
+		$_argc_action
+	else
+		_argc_usage
+	fi
+}
+
+_argc_usage_cfg() {
+	cat <<-'EOF'
+		Create a config template.
+
+		USAGE: linux-init.sh.tmp.out cfg [OUT-FILE]
+
+		ARGS:
+		  [OUT-FILE]  Where to write the file. Defaults to /etc/linux-init/config.env
+	EOF
+	exit
+}
+
+_argc_parse_cfg() {
+	local _argc_key _argc_action
+	local _argc_subcmds=""
+	while [[ $_argc_index -lt $_argc_len ]]; do
+		_argc_item="${argc__args[_argc_index]}"
+		_argc_key="${_argc_item%%=*}"
+		case "$_argc_key" in
+		--help | -help | -h)
+			_argc_usage_cfg
+			;;
+		--)
+			_argc_dash="${#argc__positionals[@]}"
+			argc__positionals+=("${argc__args[@]:$((_argc_index + 1))}")
+			_argc_index=$_argc_len
+			break
+			;;
+		*)
+			argc__positionals+=("$_argc_item")
+			_argc_index=$((_argc_index + 1))
+			;;
+		esac
+	done
+	_argc_tools=(sudo)
+	if [[ -n ${_argc_action:-} ]]; then
+		$_argc_action
+	else
+		argc__fn=cfg
+		if [[ ${argc__positionals[0]:-} == "help" ]] && [[ ${#argc__positionals[@]} -eq 1 ]]; then
+			_argc_usage_cfg
+		fi
+		_argc_match_positionals 0
+		local values_index values_size
+		IFS=: read -r values_index values_size <<<"${_argc_match_positionals_values[0]:-}"
+		if [[ -n $values_index ]]; then
+			argc_out_file="${argc__positionals[values_index]}"
+		fi
+	fi
+}
+
+_argc_usage_run() {
+	cat <<-'EOF'
+		run Load config and init the machine.
+
+		USAGE: linux-init.sh.tmp.out run [OPTIONS] [CFG-FILE]
+
+		ARGS:
+		  [CFG-FILE]  Config file location. Defaults to /etc/linux-init/config.env
+
+		OPTIONS:
+		  -d, --data-dir <DATA-DIR>  Data dir location. Defaults to /etc/linux-init/data
+		  -h, --help                 Print help
+	EOF
+	exit
+}
+
+_argc_parse_run() {
+	local _argc_key _argc_action
+	local _argc_subcmds=""
+	while [[ $_argc_index -lt $_argc_len ]]; do
+		_argc_item="${argc__args[_argc_index]}"
+		_argc_key="${_argc_item%%=*}"
+		case "$_argc_key" in
+		--help | -help | -h)
+			_argc_usage_run
+			;;
+		--)
+			_argc_dash="${#argc__positionals[@]}"
+			argc__positionals+=("${argc__args[@]:$((_argc_index + 1))}")
+			_argc_index=$_argc_len
+			break
+			;;
+		--data-dir | -d)
+			_argc_take_args "--data-dir <DATA-DIR>" 1 1 "-" ""
+			_argc_index=$((_argc_index + _argc_take_args_len + 1))
+			if [[ -z ${argc_data_dir:-} ]]; then
+				argc_data_dir="${_argc_take_args_values[0]:-}"
+			else
+				_argc_die 'error: the argument `--data-dir` cannot be used multiple times'
+			fi
+			;;
+		*)
+			if _argc_maybe_flag_option "-" "$_argc_item"; then
+				_argc_die "error: unexpected argument \`$_argc_key\` found"
+			fi
+			argc__positionals+=("$_argc_item")
+			_argc_index=$((_argc_index + 1))
+			;;
+		esac
+	done
+	_argc_tools=(sudo)
+	if [[ -n ${_argc_action:-} ]]; then
+		$_argc_action
+	else
+		argc__fn=run
+		if [[ ${argc__positionals[0]:-} == "help" ]] && [[ ${#argc__positionals[@]} -eq 1 ]]; then
+			_argc_usage_run
+		fi
+		_argc_match_positionals 0
+		local values_index values_size
+		IFS=: read -r values_index values_size <<<"${_argc_match_positionals_values[0]:-}"
+		if [[ -n $values_index ]]; then
+			argc_cfg_file="${argc__positionals[values_index]}"
+		fi
+	fi
+}
+
+_argc_take_args() {
+	_argc_take_args_values=()
+	_argc_take_args_len=0
+	local param="$1" min="$2" max="$3" signs="$4" delimiter="$5"
+	if [[ $min -eq 0 ]] && [[ $max -eq 0 ]]; then
+		return
+	fi
+	local _argc_take_index=$((_argc_index + 1)) _argc_take_value
+	if [[ $_argc_item == *=* ]]; then
+		_argc_take_args_values=("${_argc_item##*=}")
+	else
+		while [[ $_argc_take_index -lt $_argc_len ]]; do
+			_argc_take_value="${argc__args[_argc_take_index]}"
+			if _argc_maybe_flag_option "$signs" "$_argc_take_value"; then
+				if [[ ${#_argc_take_value} -gt 1 ]]; then
+					break
+				fi
+			fi
+			_argc_take_args_values+=("$_argc_take_value")
+			_argc_take_args_len=$((_argc_take_args_len + 1))
+			if [[ $_argc_take_args_len -ge $max ]]; then
+				break
+			fi
+			_argc_take_index=$((_argc_take_index + 1))
+		done
+	fi
+	if [[ ${#_argc_take_args_values[@]} -lt $min ]]; then
+		_argc_die "error: incorrect number of values for \`$param\`"
+	fi
+	if [[ -n $delimiter ]] && [[ ${#_argc_take_args_values[@]} -gt 0 ]]; then
+		local item values arr=()
+		for item in "${_argc_take_args_values[@]}"; do
+			IFS="$delimiter" read -r -a values <<<"$item"
+			arr+=("${values[@]}")
+		done
+		_argc_take_args_values=("${arr[@]}")
+	fi
+}
+
+_argc_match_positionals() {
+	_argc_match_positionals_values=()
+	_argc_match_positionals_len=0
+	local params=("$@")
+	local args_len="${#argc__positionals[@]}"
+	if [[ $args_len -eq 0 ]]; then
+		return
+	fi
+	local params_len=$# arg_index=0 param_index=0
+	while [[ $param_index -lt $params_len && $arg_index -lt $args_len ]]; do
+		local takes=0
+		if [[ ${params[param_index]} -eq 1 ]]; then
+			if [[ $param_index -eq 0 ]] \
+				&& [[ ${_argc_dash:-} -gt 0 ]] \
+				&& [[ $params_len -eq 2 ]] \
+				&& [[ ${params[$((param_index + 1))]} -eq 1 ]] \
+				; then
+				takes=${_argc_dash:-}
+			else
+				local arg_diff=$((args_len - arg_index)) param_diff=$((params_len - param_index))
+				if [[ $arg_diff -gt $param_diff ]]; then
+					takes=$((arg_diff - param_diff + 1))
+				else
+					takes=1
+				fi
+			fi
+		else
+			takes=1
+		fi
+		_argc_match_positionals_values+=("$arg_index:$takes")
+		arg_index=$((arg_index + takes))
+		param_index=$((param_index + 1))
+	done
+	if [[ $arg_index -lt $args_len ]]; then
+		_argc_match_positionals_values+=("$arg_index:$((args_len - arg_index))")
+	fi
+	_argc_match_positionals_len=${#_argc_match_positionals_values[@]}
+	if [[ $params_len -gt 0 ]] && [[ $_argc_match_positionals_len -gt $params_len ]]; then
+		local index="${_argc_match_positionals_values[params_len]%%:*}"
+		_argc_die "error: unexpected argument \`${argc__positionals[index]}\` found"
+	fi
+}
+
+_argc_maybe_flag_option() {
+	local signs="$1" arg="$2"
+	if [[ -z $signs ]]; then
+		return 1
+	fi
+	local cond=false
+	if [[ $signs == *"+"* ]]; then
+		if [[ $arg =~ ^\+[^+].* ]]; then
+			cond=true
+		fi
+	elif [[ $arg == -* ]]; then
+		if ((${#arg} < 3)) || [[ ! $arg =~ ^---.* ]]; then
+			cond=true
+		fi
+	fi
+	if [[ $cond == "false" ]]; then
+		return 1
+	fi
+	local value="${arg%%=*}"
+	if [[ $value =~ [[:space:]] ]]; then
+		return 1
+	fi
+	return 0
+}
+
+_argc_require_tools() {
+	local tool missing_tools=()
+	for tool in "$@"; do
+		if ! command -v "$tool" >/dev/null 2>&1; then
+			missing_tools+=("$tool")
+		fi
+	done
+	if [[ ${#missing_tools[@]} -gt 0 ]]; then
+		echo "error: missing tools: ${missing_tools[*]}" >&2
+		exit 1
+	fi
+}
+
+_argc_die() {
+	if [[ $# -eq 0 ]]; then
+		cat
+	else
+		echo "$*" >&2
+	fi
+	exit 1
+}
+
+_argc_run "$@"
+
+# ARGC-BUILD }

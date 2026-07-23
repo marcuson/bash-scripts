@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 
-LinuxInitMod:prepareSSH() {
-    IO:print "Adding .ssh folders and basic files"
+Mbs:LinuxInit:prepareSSH() {
+    Mbs:Io:print "Adding .ssh folders and basic files"
 
-    if LinuxInitMod:isVarEmpty "$LI__USER"; then
-        IO:print "Missing LI__USER, please enter the normal user name and press enter\n"
+    if Mbs:Var:isEmpty "$LI__USER"; then
+        Mbs:Io:print "Missing LI__USER, please enter the normal user name and press enter\n"
         read -r
         LI__USER="$REPLY"
     fi
 
-    if ! LinuxInitMod:isNormalUser "$LI__USER"; then
-        IO:alert "LI__USER problem, it must be set, it must be a normal user, it must exists"
+    if ! Mbs:User:isNormal "$LI__USER"; then
+        Mbs:Io:error "LI__USER problem, it must be set, it must be a normal user, it must exists"
         return 1
     fi
 
-    if LinuxInitMod:isVarEmpty "$home_user_d"; then
+    if Mbs:Var:isEmpty "$home_user_d"; then
         home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
     fi
 
@@ -26,6 +26,6 @@ LinuxInitMod:prepareSSH() {
     sudo -u "$LI__USER" touch "$ssh_auth_keys_user_f" "$ssh_known_hosts_user_f"
     chmod 700 "$ssh_user_d"
     chmod 600 "$ssh_auth_keys_user_f" "$ssh_known_hosts_user_f"
-    IO:print ".ssh folders and basic files added"
+    Mbs:Io:print ".ssh folders and basic files added"
     return 0
 }
