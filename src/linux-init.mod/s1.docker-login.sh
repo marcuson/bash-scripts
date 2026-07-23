@@ -8,7 +8,7 @@ Mbs:LinuxInit:dockerLogin() {
     local docker_group="docker"
 
     if Mbs:Var:isEmpty "$home_user_d"; then
-        home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+        home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
     fi
     local auth_f="$home_user_d/.docker/config.json"
 
@@ -20,28 +20,28 @@ Mbs:LinuxInit:dockerLogin() {
     Mbs:Io:print "Please prepare docker hub user and password"
     Mbs:Io:paktc
 
-    if Mbs:Var:isEmpty "$LI__USER"; then
-        Mbs:Io:error "Missing LI__USER, please enter the normal user name and press enter"
+    if Mbs:Var:isEmpty "$MBS__LI__USER"; then
+        Mbs:Io:error "Missing MBS__LI__USER, please enter the normal user name and press enter"
         read -r
-        LI__USER="$REPLY"
+        MBS__LI__USER="$REPLY"
     fi
 
-    if ! Mbs:User:isNormal "$LI__USER"; then
-        Mbs:Io:error "LI__USER problem, it must be set, it must be a normal user, it must exists"
+    if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+        Mbs:Io:error "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
         return 1
     fi
 
-    if ! Mbs:User:isCurrentInGroup "$LI__USER" "$docker_group"; then
-        Mbs:Io:error "LI__USER found, $LI__USER isn't in $docker_group group"
-        read -p "Do you want to add $LI__USER to $docker_group group? Y/N: " -n 1 -r
+    if ! Mbs:User:isCurrentInGroup "$MBS__LI__USER" "$docker_group"; then
+        Mbs:Io:error "MBS__LI__USER found, $MBS__LI__USER isn't in $docker_group group"
+        read -p "Do you want to add $MBS__LI__USER to $docker_group group? Y/N: " -n 1 -r
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            usermod -aG "$docker_group" "$LI__USER"
+            usermod -aG "$docker_group" "$MBS__LI__USER"
         else
             Mbs:Io:error "Cannot proceed"
             return 1
         fi
     fi
 
-    sudo -u "$LI__USER" docker login -u "$LI__DOCKER_LOGIN__USERNAME"
+    sudo -u "$MBS__LI__USER" docker login -u "$MBS__LI__DOCKER_LOGIN__USERNAME"
     return 0
 }

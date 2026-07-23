@@ -3,13 +3,13 @@
 Mbs:LinuxInit:restoreBackup() {
     Mbs:Io:print "Restoring backup"
 
-    Mbs:Var:isSet "LI__BACKUP_RESTORE__FILE_PATH" || return 1
+    Mbs:Var:isSet "MBS__LI__BACKUP_RESTORE__FILE_PATH" || return 1
 
-    if [ ! -f "$LI__BACKUP_RESTORE__FILE_PATH" ]; then
-        Mbs:Io:print "Cannot find $LI__BACKUP_RESTORE__FILE_PATH, please check"
+    if [ ! -f "$MBS__LI__BACKUP_RESTORE__FILE_PATH" ]; then
+        Mbs:Io:print "Cannot find $MBS__LI__BACKUP_RESTORE__FILE_PATH, please check"
         return 1
     else
-        tar --same-owner -xf "$LI__BACKUP_RESTORE__FILE_PATH" -C /
+        tar --same-owner -xf "$MBS__LI__BACKUP_RESTORE__FILE_PATH" -C /
     fi
 
     Mbs:Io:print "Backup restored"

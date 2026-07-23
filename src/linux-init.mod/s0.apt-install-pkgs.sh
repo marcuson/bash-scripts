@@ -4,13 +4,13 @@ Mbs:LinuxInit:installAptPackages() {
     declare -a config_pkgs_arr
     Mbs:Io:print "Installing new packages"
 
-    if Mbs:Var:isEmpty "$LI__APT_INSTALL_PACKAGES__PACKAGES"; then
-        Mbs:Io:print "LI__APT_INSTALL_PACKAGES__PACKAGES unset or empty"
+    if Mbs:Var:isEmpty "$MBS__LI__APT_INSTALL_PACKAGES__PACKAGES"; then
+        Mbs:Io:print "MBS__LI__APT_INSTALL_PACKAGES__PACKAGES unset or empty"
         Mbs:Io:print "Please input one or more space separated APT packages to install, then press enter to confirm:"
         read -r -a config_pkgs_arr
         Mbs:Io:print ""
     else
-        readarray -td, config_pkgs_arr <<<"$LI__APT_INSTALL_PACKAGES__PACKAGES,"
+        readarray -td, config_pkgs_arr <<<"$MBS__LI__APT_INSTALL_PACKAGES__PACKAGES,"
         unset 'config_pkgs_arr[-1]'
     fi
 

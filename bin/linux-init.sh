@@ -14,8 +14,8 @@ set -euo pipefail
 
 _this_dir="$(cd -P "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" >/dev/null 2>&1 && pwd)"
 
-# File included (base64) [linux-init.mod/linux-init.tpl.env]
-cfg_tpl_content="IyBDb25maWd1cmFibGUgdmFyaWFibGVzCgojIC0tIEdlbmVyYWwKIyAtLS0tIFVzZXIgLSB0aGUgbm9uIHJvb3QgY29uZmlndXJlZCB1c2VyCkxJX19VU0VSPXh4eAojIC0tLS0gSW5zdGFsbGF0aW9uIHR5cGUgLSBzZXJ2ZXIgb3IgZGVza3RvcApMSV9fSU5TVEFMTEFUSU9OX1RZUEU9c2VydmVyCiMgLS0tLSBCaXR3YXJkZW4gaW50ZWdyYXRpb24KTUJTX19CV19fVVJMPXh4eApNQlNfX0JXX19DTElFTlRfSUQ9eHh4Ck1CU19fQldfX0NMSUVOVF9TRUNSRVQ9eHh4Ck1CU19fQldfX01BU1RFUl9QQVNTV09SRD14eHgKCiMgLS0gU3RlcCAwCiMgLS0tLSBBUFQgLSBBZGQgRG9ja2VyIHJlcG8KTElfX0FERF9ET0NLRVJfQVBUX1JFUE9fX0lTX0VOQUJMRUQ9eQojIC0tLS0gQVBUIC0gaW5zdGFsbCBwYWNrYWdlcwpMSV9fQVBUX0lOU1RBTExfUEFDS0FHRVNfX0lTX0VOQUJMRUQ9eQpMSV9fQVBUX0lOU1RBTExfUEFDS0FHRVNfX1BBQ0tBR0VTPSJjYS1jZXJ0aWZpY2F0ZXMsY3VybCxodG9wLGdpdCx1bnppcCxkb2NrZXItY2UsZG9ja2VyLWNlLWNsaSxjb250YWluZXJkLmlvLGRvY2tlci1idWlsZHgtcGx1Z2luLGRvY2tlci1jb21wb3NlLXBsdWdpbiIKIyAtLS0tIFNlcnZpY2VzIC0gZG9ja2VyCkxJX19TUlZfRE9DS0VSX0VOQUJMRVJfX0lTX0VOQUJMRUQ9eQojIC0tLS0gR2l0IC0gYmFzaWMgY29uZmlnCkxJX19HSVRfQ09ORklHX19JU19FTkFCTEVEPXkKTElfX0dJVF9DT05GSUdfX1VTRVJOQU1FPSJGaXJzdE5hbWUgTGFzdE5hbWUiCkxJX19HSVRfQ09ORklHX19FTUFJTD0ieHh4QHh4eC5jb20iCiMgLS0tLSBKb3VybmFsIC0gbGltaXQgc2l6ZQpMSV9fSk9VUk5BTF9MSU1JVF9fSVNfRU5BQkxFRD15CkxJX19KT1VSTkFMX0xJTUlUX19TWVNURU1fTUFYPSIxMDI0TSIKTElfX0pPVVJOQUxfTElNSVRfX0ZJTEVfTUFYPSIxMDBNIgojIC0tLS0gTmFubyAtIGVuYWJsZSBzeW50YXggaGlnaGxpZ2h0aW5nCkxJX19OQU5PX1NZTlRBWF9ISUdITElHSFRJTkdfX0lTX0VOQUJMRUQ9eQojIC0tLS0gTmV0d29yayAtIGVuYWJsZSByb3V0aW5nCkxJX19ORVRXT1JLX1JPVVRJTkdfX0lTX0VOQUJMRUQ9eQojIC0tLS0gTmV0d29yayAtIGVuYWJsZSBzcmMgdmFsaWQgbWFyawpMSV9fTkVUV09SS19TUkNfVkFMSURfTUFSS19fSVNfRU5BQkxFRD15CiMgLS0tLSBTU0ggLSBwcmVwYXJlCiMgTk9URTogTm8gY29uZmlnIGZvciBub3cKIyAtLS0tIFJBTSAtIHNldCBzd2FwcGluZXNzCkxJX19SQU1fU1dBUFBJTkVTU19fSVNfRU5BQkxFRD15CkxJX19SQU1fU1dBUFBJTkVTU19fVkFMVUU9IjEwIgojIC0tLS0gVXNlciAtIGFkZCB0byBncm91cHMKTElfX1VTRVJfQUREX1RPX0dST1VQU19fSVNfRU5BQkxFRD15CkxJX19VU0VSX0FERF9UT19HUk9VUFNfX0dST1VQUz0iZG9ja2VyLHR0eSx1dWNwLGxwIgojIC0tLS0gVXNlciAtIHN1ZG8gd2l0aG91dCBwYXNzd29yZApMSV9fUEFTU1dPUkRMRVNTX1NVRE9fX0lTX0VOQUJMRUQ9eQojIC0tLS0gSW5zdGFsbCBTT1BTCkxJX19JTlNUQUxMX1NPUFNfX0lTX0VOQUJMRUQ9eQojIC0tLS0gSW5zdGFsbCBvaC1teS1wb3NoCkxJX19JTlNUQUxMX09IX01ZX1BPU0hfX0lTX0VOQUJMRUQ9eQojIC0tLS0gS29tb2RvIHByZXAKTElfX0tPTU9ET19QUkVQX19JU19FTkFCTEVEPXkKTElfX0tPTU9ET19QUkVQX19TT1BTX0tFWT14eHgKCiMgLS0gU3RlcCAxCiMgLS0tLSBEb2NrZXIgLSBsb2dpbgpMSV9fRE9DS0VSX0xPR0lOX19JU19FTkFCTEVEPXkKTElfX0RPQ0tFUl9MT0dJTl9fVVNFUk5BTUU9Inh4eCIKIyAtLS0tIERvY2tlciAtIGN1c3RvbSBicmlkZ2UgbmV0d29yawpMSV9fRE9DS0VSX05FVFdPUktfQ1VTVE9NX0JSSURHRV9fSVNfRU5BQkxFRD15CkxJX19ET0NLRVJfTkVUV09SS19DVVNUT01fQlJJREdFX19OQU1FPSJkb2NrZXJuZXRfYnJpZGdlIgojIC0tLS0gRG9ja2VyIC0gc3RhcnQgY29tcG9zZQpMSV9fRE9DS0VSX0NPTVBPU0VfU1RBUlRfX0lTX0VOQUJMRUQ9bgpMSV9fRE9DS0VSX0NPTVBPU0VfU1RBUlRfX0ZJTEVfUEFUSD0iL2Fic29sdXRlL3BhdGgvdG8vZG9ja2VyLWNvbXBvc2UueW1sIgojIC0tLS0gQmFja3VwIC0gcmVzdG9yZQpMSV9fQkFDS1VQX1JFU1RPUkVfX0lTX0VOQUJMRUQ9bgpMSV9fQkFDS1VQX1JFU1RPUkVfX0ZJTEVfUEFUSD0iL2Fic29sdXRlL3BhdGgvdG8vYmFja3VwLnRhci5neiIK"
+# File included (base64) [linux-init.mod/config.tpl.env]
+cfg_tpl_content="IyBDb25maWd1cmFibGUgdmFyaWFibGVzCgojIC0tIEdlbmVyYWwKIyAtLS0tIFVzZXIgLSB0aGUgbm9uIHJvb3QgY29uZmlndXJlZCB1c2VyCk1CU19fTElfX1VTRVI9eHh4CiMgLS0tLSBJbnN0YWxsYXRpb24gdHlwZSAtIHNlcnZlciBvciBkZXNrdG9wCk1CU19fTElfX0lOU1RBTExBVElPTl9UWVBFPXNlcnZlcgojIC0tLS0gQml0d2FyZGVuIGludGVncmF0aW9uCk1CU19fQldfX1VSTD14eHgKTUJTX19CV19fQ0xJRU5UX0lEPXh4eApNQlNfX0JXX19DTElFTlRfU0VDUkVUPXh4eApNQlNfX0JXX19NQVNURVJfUEFTU1dPUkQ9eHh4CgojIC0tIFN0ZXAgMAojIC0tLS0gQVBUIC0gQWRkIERvY2tlciByZXBvCk1CU19fTElfX0FERF9ET0NLRVJfQVBUX1JFUE9fX0lTX0VOQUJMRUQ9eQojIC0tLS0gQVBUIC0gaW5zdGFsbCBwYWNrYWdlcwpNQlNfX0xJX19BUFRfSU5TVEFMTF9QQUNLQUdFU19fSVNfRU5BQkxFRD15Ck1CU19fTElfX0FQVF9JTlNUQUxMX1BBQ0tBR0VTX19QQUNLQUdFUz0iY2EtY2VydGlmaWNhdGVzLGN1cmwsaHRvcCxnaXQsdW56aXAsZG9ja2VyLWNlLGRvY2tlci1jZS1jbGksY29udGFpbmVyZC5pbyxkb2NrZXItYnVpbGR4LXBsdWdpbixkb2NrZXItY29tcG9zZS1wbHVnaW4iCiMgLS0tLSBTZXJ2aWNlcyAtIGRvY2tlcgpNQlNfX0xJX19TUlZfRE9DS0VSX0VOQUJMRVJfX0lTX0VOQUJMRUQ9eQojIC0tLS0gR2l0IC0gYmFzaWMgY29uZmlnCk1CU19fTElfX0dJVF9DT05GSUdfX0lTX0VOQUJMRUQ9eQpNQlNfX0xJX19HSVRfQ09ORklHX19VU0VSTkFNRT0iRmlyc3ROYW1lIExhc3ROYW1lIgpNQlNfX0xJX19HSVRfQ09ORklHX19FTUFJTD0ieHh4QHh4eC5jb20iCiMgLS0tLSBKb3VybmFsIC0gbGltaXQgc2l6ZQpNQlNfX0xJX19KT1VSTkFMX0xJTUlUX19JU19FTkFCTEVEPXkKTUJTX19MSV9fSk9VUk5BTF9MSU1JVF9fU1lTVEVNX01BWD0iMTAyNE0iCk1CU19fTElfX0pPVVJOQUxfTElNSVRfX0ZJTEVfTUFYPSIxMDBNIgojIC0tLS0gTmFubyAtIGVuYWJsZSBzeW50YXggaGlnaGxpZ2h0aW5nCk1CU19fTElfX05BTk9fU1lOVEFYX0hJR0hMSUdIVElOR19fSVNfRU5BQkxFRD15CiMgLS0tLSBOZXR3b3JrIC0gZW5hYmxlIHJvdXRpbmcKTUJTX19MSV9fTkVUV09SS19ST1VUSU5HX19JU19FTkFCTEVEPXkKIyAtLS0tIE5ldHdvcmsgLSBlbmFibGUgc3JjIHZhbGlkIG1hcmsKTUJTX19MSV9fTkVUV09SS19TUkNfVkFMSURfTUFSS19fSVNfRU5BQkxFRD15CiMgLS0tLSBTU0ggLSBwcmVwYXJlCiMgTk9URTogTm8gY29uZmlnIGZvciBub3cKIyAtLS0tIFJBTSAtIHNldCBzd2FwcGluZXNzCk1CU19fTElfX1JBTV9TV0FQUElORVNTX19JU19FTkFCTEVEPXkKTUJTX19MSV9fUkFNX1NXQVBQSU5FU1NfX1ZBTFVFPSIxMCIKIyAtLS0tIFVzZXIgLSBhZGQgdG8gZ3JvdXBzCk1CU19fTElfX1VTRVJfQUREX1RPX0dST1VQU19fSVNfRU5BQkxFRD15Ck1CU19fTElfX1VTRVJfQUREX1RPX0dST1VQU19fR1JPVVBTPSJkb2NrZXIsdHR5LHV1Y3AsbHAiCiMgLS0tLSBVc2VyIC0gc3VkbyB3aXRob3V0IHBhc3N3b3JkCk1CU19fTElfX1BBU1NXT1JETEVTU19TVURPX19JU19FTkFCTEVEPXkKIyAtLS0tIEluc3RhbGwgU09QUwpNQlNfX0xJX19JTlNUQUxMX1NPUFNfX0lTX0VOQUJMRUQ9eQojIC0tLS0gSW5zdGFsbCBvaC1teS1wb3NoCk1CU19fTElfX0lOU1RBTExfT0hfTVlfUE9TSF9fSVNfRU5BQkxFRD15CiMgLS0tLSBLb21vZG8gcHJlcApNQlNfX0xJX19LT01PRE9fUFJFUF9fSVNfRU5BQkxFRD15Ck1CU19fTElfX0tPTU9ET19QUkVQX19TT1BTX0tFWT14eHgKCiMgLS0gU3RlcCAxCiMgLS0tLSBEb2NrZXIgLSBsb2dpbgpNQlNfX0xJX19ET0NLRVJfTE9HSU5fX0lTX0VOQUJMRUQ9eQpNQlNfX0xJX19ET0NLRVJfTE9HSU5fX1VTRVJOQU1FPSJ4eHgiCiMgLS0tLSBEb2NrZXIgLSBjdXN0b20gYnJpZGdlIG5ldHdvcmsKTUJTX19MSV9fRE9DS0VSX05FVFdPUktfQ1VTVE9NX0JSSURHRV9fSVNfRU5BQkxFRD15Ck1CU19fTElfX0RPQ0tFUl9ORVRXT1JLX0NVU1RPTV9CUklER0VfX05BTUU9ImRvY2tlcm5ldF9icmlkZ2UiCiMgLS0tLSBEb2NrZXIgLSBzdGFydCBjb21wb3NlCk1CU19fTElfX0RPQ0tFUl9DT01QT1NFX1NUQVJUX19JU19FTkFCTEVEPW4KTUJTX19MSV9fRE9DS0VSX0NPTVBPU0VfU1RBUlRfX0ZJTEVfUEFUSD0iL2Fic29sdXRlL3BhdGgvdG8vZG9ja2VyLWNvbXBvc2UueW1sIgojIC0tLS0gQmFja3VwIC0gcmVzdG9yZQpNQlNfX0xJX19CQUNLVVBfUkVTVE9SRV9fSVNfRU5BQkxFRD1uCk1CU19fTElfX0JBQ0tVUF9SRVNUT1JFX19GSUxFX1BBVEg9Ii9hYnNvbHV0ZS9wYXRoL3RvL2JhY2t1cC50YXIuZ3oiCg=="
 
 #region Bundler import [utils.mod/io.sh]
 
@@ -227,8 +227,6 @@ Mbs:Script:isFunc() {
 
 Mbs:Script:die() {
 	Mbs:Io:error "$@"
-
-	# FIXME: Unregister traps
 	exit 1
 }
 #endregion Bundler import [utils.mod/script.sh]
@@ -654,11 +652,11 @@ run() {
 		Mbs:Script:die "This script must be run as root"
 	fi
 
-	if ! Mbs:User:isNormal "$LI__USER"; then
-		Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+	if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+		Mbs:Script:die "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
 	fi
 
-	home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+	home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
 
 	helper_f_content=$(<"$helper_f")
 
@@ -684,7 +682,7 @@ function _run_step_0() {
 	echo "Packages updated"
 
 	# Journal - limit size
-	if Mbs:Var:isTrue "$LI__JOURNAL_LIMIT__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__JOURNAL_LIMIT__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.journal-limit.sh]
 
@@ -697,8 +695,8 @@ function _run_step_0() {
 			local journal_conf_f="${journal_conf_d}/size.conf"
 
 			# Apply default if conf is not found
-			local system_max="${LI__JOURNAL_LIMIT__SYSTEM_MAX:=$config_journal_system_max_default}"
-			local file_max="${LI__JOURNAL_LIMIT__FILE_MAX:=$config_journal_file_max_default}"
+			local system_max="${MBS__LI__JOURNAL_LIMIT__SYSTEM_MAX:=$config_journal_system_max_default}"
+			local file_max="${MBS__LI__JOURNAL_LIMIT__FILE_MAX:=$config_journal_file_max_default}"
 
 			Mbs:Io:print "Limit journal size"
 			mkdir -p "$journal_conf_d"
@@ -713,7 +711,7 @@ function _run_step_0() {
 	fi
 
 	# RAM - set swappiness
-	if Mbs:Var:isTrue "$LI__RAM_SWAPPINESS__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__RAM_SWAPPINESS__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.swappiness.sh]
 
@@ -723,7 +721,7 @@ function _run_step_0() {
 			# Dirs
 			local swappiness_conf_f="/etc/sysctl.d/swappiness.conf"
 			# Apply default if conf is not found
-			local swappiness="${LI__RAM_SWAPPINESS__VALUE:=$swappiness_default}"
+			local swappiness="${MBS__LI__RAM_SWAPPINESS__VALUE:=$swappiness_default}"
 
 			Mbs:Io:print "Setting custom swappiness"
 			Mbs:Io:print "New swappiness value: $swappiness"
@@ -736,7 +734,7 @@ function _run_step_0() {
 	fi
 
 	# APT - add Docker repo
-	if Mbs:Var:isTrue "$LI__ADD_DOCKER_APT_REPO__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__ADD_DOCKER_APT_REPO__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.apt-add-docker-repo.sh]
 
@@ -777,7 +775,7 @@ function _run_step_0() {
 	fi
 
 	# APT - install packages
-	if Mbs:Var:isTrue "$LI__APT_INSTALL_PACKAGES__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__APT_INSTALL_PACKAGES__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.apt-install-pkgs.sh]
 
@@ -785,13 +783,13 @@ function _run_step_0() {
 			declare -a config_pkgs_arr
 			Mbs:Io:print "Installing new packages"
 
-			if Mbs:Var:isEmpty "$LI__APT_INSTALL_PACKAGES__PACKAGES"; then
-				Mbs:Io:print "LI__APT_INSTALL_PACKAGES__PACKAGES unset or empty"
+			if Mbs:Var:isEmpty "$MBS__LI__APT_INSTALL_PACKAGES__PACKAGES"; then
+				Mbs:Io:print "MBS__LI__APT_INSTALL_PACKAGES__PACKAGES unset or empty"
 				Mbs:Io:print "Please input one or more space separated APT packages to install, then press enter to confirm:"
 				read -r -a config_pkgs_arr
 				Mbs:Io:print ""
 			else
-				readarray -td, config_pkgs_arr <<<"$LI__APT_INSTALL_PACKAGES__PACKAGES,"
+				readarray -td, config_pkgs_arr <<<"$MBS__LI__APT_INSTALL_PACKAGES__PACKAGES,"
 				unset 'config_pkgs_arr[-1]'
 			fi
 
@@ -804,18 +802,18 @@ function _run_step_0() {
 	fi
 
 	# User - add to groups
-	if Mbs:Var:isTrue "$LI__USER_ADD_TO_GROUPS__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__USER_ADD_TO_GROUPS__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.user-groups.sh]
 
 		Mbs:LinuxInit:addUserToGroups() {
 			Mbs:Io:print "Adding user to groups"
 
-			Mbs:Var:isSet "LI__USER" || return 1
-			Mbs:Var:isSet "LI__USER_ADD_TO_GROUPS__GROUPS" || return 1
+			Mbs:Var:isSet "MBS__LI__USER" || return 1
+			Mbs:Var:isSet "MBS__LI__USER_ADD_TO_GROUPS__GROUPS" || return 1
 
-			Mbs:Io:print "Adding $LI__USER to $LI__USER_ADD_TO_GROUPS__GROUPS groups"
-			usermod -aG "$LI__USER_ADD_TO_GROUPS__GROUPS" "$LI__USER"
+			Mbs:Io:print "Adding $MBS__LI__USER to $MBS__LI__USER_ADD_TO_GROUPS__GROUPS groups"
+			usermod -aG "$MBS__LI__USER_ADD_TO_GROUPS__GROUPS" "$MBS__LI__USER"
 			return 0
 		}
 		#endregion Bundler import [linux-init.mod/s0.user-groups.sh]
@@ -823,36 +821,36 @@ function _run_step_0() {
 	fi
 
 	# User - sudo without password
-	if Mbs:Var:isTrue "$LI__PASSWORDLESS_SUDO__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__PASSWORDLESS_SUDO__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.user-passwordless-sudo.sh]
 
 		Mbs:LinuxInit:enablePasswordlessSudo() {
 			Mbs:Io:print "Setting sudo without password"
 
-			if Mbs:Var:isEmpty "$LI__USER"; then
-				Mbs:Io:print "Missing LI__USER, please enter the normal user name and press enter: "
+			if Mbs:Var:isEmpty "$MBS__LI__USER"; then
+				Mbs:Io:print "Missing MBS__LI__USER, please enter the normal user name and press enter: "
 				read -r
-				LI__USER="$REPLY"
+				MBS__LI__USER="$REPLY"
 			fi
 
-			if ! Mbs:User:isNormal "$LI__USER"; then
-				Mbs:Io:error "LI__USER problem, it must be set, it must be a normal user, it must exists"
+			if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+				Mbs:Io:error "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
 				return 1
 			fi
 
-			Mbs:Io:print "New super-uber-user: $LI__USER"
+			Mbs:Io:print "New super-uber-user: $MBS__LI__USER"
 
-			local sudoers_f="/etc/sudoers.d/99-$LI__USER"
+			local sudoers_f="/etc/sudoers.d/99-$MBS__LI__USER"
 
 			if [ -f "$sudoers_f" ]; then
 				Mbs:Io:print "$sudoers_f file already exists, please check"
 				return 0
 			fi
 
-			echo "$LI__USER ALL=(ALL) NOPASSWD: ALL" | tee "$sudoers_f" >/dev/null
+			echo "$MBS__LI__USER ALL=(ALL) NOPASSWD: ALL" | tee "$sudoers_f" >/dev/null
 			chmod 750 "$sudoers_f"
-			Mbs:Io:print "$LI__USER can run sudo without password from the next boot."
+			Mbs:Io:print "$MBS__LI__USER can run sudo without password from the next boot."
 			return 0
 		}
 		#endregion Bundler import [linux-init.mod/s0.user-passwordless-sudo.sh]
@@ -860,19 +858,19 @@ function _run_step_0() {
 	fi
 
 	# Nano - enable syntax highlighting
-	if Mbs:Var:isTrue "$LI__NANO_SYNTAX_HIGHLIGHTING__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__NANO_SYNTAX_HIGHLIGHTING__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.nano-syntax-highlighting.sh]
 
 		Mbs:LinuxInit:enableNanoSyntaxHighlighting() {
 			Mbs:Io:print "Enabling Nano Syntax highlighting"
 
-			if ! Mbs:User:isNormal "$LI__USER"; then
-				Mbs:Script:die "\nLI__USER problem, it must be set, it must be a normal user, it must exists"
+			if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+				Mbs:Script:die "\nMBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
 			fi
 
 			if Mbs:Var:isEmpty "$home_user_d"; then
-				home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+				home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
 			fi
 
 			home_root_d=$(sudo -u root sh -c 'echo $HOME')
@@ -888,7 +886,7 @@ function _run_step_0() {
 			fi
 
 			if [ ! -f "$nano_conf_user_f" ] || ! grep -q 'include "/usr/share/nano/\*.nanorc' "$nano_conf_user_f"; then
-				echo -e 'include "/usr/share/nano/*.nanorc"\nset linenumbers' | sudo -u "$LI__USER" tee -a "$nano_conf_user_f" >/dev/null
+				echo -e 'include "/usr/share/nano/*.nanorc"\nset linenumbers' | sudo -u "$MBS__LI__USER" tee -a "$nano_conf_user_f" >/dev/null
 			else
 				Mbs:Io:print "$nano_conf_user_f already configured"
 			fi
@@ -900,7 +898,7 @@ function _run_step_0() {
 	fi
 
 	# Network - enable routing
-	if Mbs:Var:isTrue "$LI__NETWORK_ROUTING__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__NETWORK_ROUTING__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.network-routing.sh]
 
@@ -916,7 +914,7 @@ function _run_step_0() {
 	fi
 
 	# Network - enable src valid mark
-	if Mbs:Var:isTrue "$LI__NETWORK_SRC_VALID_MARK__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__NETWORK_SRC_VALID_MARK__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.network-src-valid-mark.sh]
 
@@ -938,27 +936,27 @@ function _run_step_0() {
 	Mbs:LinuxInit:prepareSSH() {
 		Mbs:Io:print "Adding .ssh folders and basic files"
 
-		if Mbs:Var:isEmpty "$LI__USER"; then
-			Mbs:Io:print "Missing LI__USER, please enter the normal user name and press enter\n"
+		if Mbs:Var:isEmpty "$MBS__LI__USER"; then
+			Mbs:Io:print "Missing MBS__LI__USER, please enter the normal user name and press enter\n"
 			read -r
-			LI__USER="$REPLY"
+			MBS__LI__USER="$REPLY"
 		fi
 
-		if ! Mbs:User:isNormal "$LI__USER"; then
-			Mbs:Io:error "LI__USER problem, it must be set, it must be a normal user, it must exists"
+		if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+			Mbs:Io:error "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
 			return 1
 		fi
 
 		if Mbs:Var:isEmpty "$home_user_d"; then
-			home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+			home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
 		fi
 
 		local ssh_user_d="$home_user_d/.ssh"
 		export ssh_auth_keys_user_f="$ssh_user_d/authorized_keys"
 		export ssh_known_hosts_user_f="$ssh_user_d/known_hosts"
 
-		sudo -u "$LI__USER" mkdir -p "$ssh_user_d"
-		sudo -u "$LI__USER" touch "$ssh_auth_keys_user_f" "$ssh_known_hosts_user_f"
+		sudo -u "$MBS__LI__USER" mkdir -p "$ssh_user_d"
+		sudo -u "$MBS__LI__USER" touch "$ssh_auth_keys_user_f" "$ssh_known_hosts_user_f"
 		chmod 700 "$ssh_user_d"
 		chmod 600 "$ssh_auth_keys_user_f" "$ssh_known_hosts_user_f"
 		Mbs:Io:print ".ssh folders and basic files added"
@@ -968,7 +966,7 @@ function _run_step_0() {
 	Mbs:LinuxInit:prepareSSH || Mbs:Script:die "Failed to prepare SSH"
 
 	# Services - docker
-	if Mbs:Var:isTrue "$LI__SRV_DOCKER_ENABLER__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__SRV_DOCKER_ENABLER__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.docker-service-enabler.sh]
 
@@ -992,19 +990,19 @@ function _run_step_0() {
 	fi
 
 	# Git - config
-	if Mbs:Var:isTrue "$LI__GIT_CONFIG__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__GIT_CONFIG__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.git-config.sh]
 
 		Mbs:LinuxInit:configGit() {
 			Mbs:Io:print "Configuring basic Git settings"
 
-			if ! Mbs:User:isNormal "$LI__USER"; then
-				Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+			if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+				Mbs:Script:die "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
 			fi
 
-			sudo -u "$LI__USER" sh -c "git config --global user.name \"$LI__GIT_CONFIG__USERNAME\""
-			sudo -u "$LI__USER" sh -c "git config --global user.email \"$LI__GIT_CONFIG__EMAIL\""
+			sudo -u "$MBS__LI__USER" sh -c "git config --global user.name \"$MBS__LI__GIT_CONFIG__USERNAME\""
+			sudo -u "$MBS__LI__USER" sh -c "git config --global user.email \"$MBS__LI__GIT_CONFIG__EMAIL\""
 			return 0
 		}
 		#endregion Bundler import [linux-init.mod/s0.git-config.sh]
@@ -1012,35 +1010,35 @@ function _run_step_0() {
 	fi
 
 	# Install oh-my-posh
-	if Mbs:Var:isTrue "$LI__INSTALL_OH_MY_POSH__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__INSTALL_OH_MY_POSH__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.install-oh-my-posh.sh]
 
 		Mbs:LinuxInit:installOhMyPosh() {
 			Mbs:Io:print "Installing oh-my-posh"
 
-			if ! Mbs:User:isNormal "$LI__USER"; then
-				Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+			if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+				Mbs:Script:die "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
 			fi
 
-			sudo -u "$LI__USER" bash -c "curl -s https://ohmyposh.dev/install.sh | bash -s"
+			sudo -u "$MBS__LI__USER" bash -c "curl -s https://ohmyposh.dev/install.sh | bash -s"
 
 			if Mbs:Var:isEmpty "$home_user_d"; then
-				home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+				home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
 			fi
 
 			local profile_user_f="$home_user_d/.profile"
 
 			if [ ! -f "$profile_user_f" ] || ! grep -q 'oh-my-posh' "$profile_user_f"; then
 				local user_default_shell
-				user_default_shell=$(awk -F: -v user="$LI__USER" '$1 == user {print $NF}' /etc/passwd)
+				user_default_shell=$(awk -F: -v user="$MBS__LI__USER" '$1 == user {print $NF}' /etc/passwd)
 
-				sudo -u "$LI__USER" "$user_default_shell" -c 'export PATH=$PATH:$HOME/.local/bin; oh-my-posh font install meslo'
+				sudo -u "$MBS__LI__USER" "$user_default_shell" -c 'export PATH=$PATH:$HOME/.local/bin; oh-my-posh font install meslo'
 
 				local omp_shell
-				omp_shell=$(sudo -u "$LI__USER" "$user_default_shell" -c 'export PATH=$PATH:$HOME/.local/bin; oh-my-posh get shell; echo $SHELL 2>&1 > /dev/null')
+				omp_shell=$(sudo -u "$MBS__LI__USER" "$user_default_shell" -c 'export PATH=$PATH:$HOME/.local/bin; oh-my-posh get shell; echo $SHELL 2>&1 > /dev/null')
 
-				sudo -u "$LI__USER" bash -c "wget https://raw.githubusercontent.com/Nick2bad4u/OhMyPosh-Atomic-Enhanced/main/OhMyPosh-Atomic-Custom-ExperimentalDividers.json -O $home_user_d/.omp.json"
+				sudo -u "$MBS__LI__USER" bash -c "wget https://raw.githubusercontent.com/Nick2bad4u/OhMyPosh-Atomic-Enhanced/main/OhMyPosh-Atomic-Custom-ExperimentalDividers.json -O $home_user_d/.omp.json"
 
 				cat <<EOF >>"$profile_user_f"
 if [ -n "\$DISPLAY" ] || [ -n "\$WAYLAND_DISPLAY" ] || [ "\$TERM" = "xterm-256color" ]; then
@@ -1060,7 +1058,7 @@ EOF
 	fi
 
 	# Install SOPS
-	if Mbs:Var:isTrue "$LI__INSTALL_SOPS__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__INSTALL_SOPS__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.install-sops.sh]
 
@@ -1101,23 +1099,23 @@ EOF
 	fi
 
 	# Prep Komodo
-	if Mbs:Var:isTrue "$LI__KOMODO_PREP__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__KOMODO_PREP__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s0.komodo-prep.sh]
 
 		Mbs:LinuxInit:komodoPrep() {
 			Mbs:Io:print "Prepare Komodo"
 
-			if ! Mbs:User:isNormal "$LI__USER"; then
-				Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+			if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+				Mbs:Script:die "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
 			fi
 
 			if Mbs:Var:isEmpty "$home_user_d"; then
-				home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+				home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
 			fi
 
-			if Mbs:LinuxInit:isVarEmpty "$LI__KOMODO_PREP__SOPS_KEY"; then
-				Mbs:Script:die "LI__KOMODO_PREP__SOPS_KEY env var must be set"
+			if Mbs:LinuxInit:isVarEmpty "$MBS__LI__KOMODO_PREP__SOPS_KEY"; then
+				Mbs:Script:die "MBS__LI__KOMODO_PREP__SOPS_KEY env var must be set"
 			fi
 
 			local home_root_d="$HOME"
@@ -1132,18 +1130,18 @@ EOF
 			fi
 
 			if [ ! -f "$profile_user_f" ] || ! grep -q 'SOPS_AGE_KEY_FILE' "$profile_user_f"; then
-				sudo -u "$LI__USER" "sh" -c "echo export SOPS_AGE_KEY_FILE=/srv/docker/age.key >> \"$profile_user_f\""
+				sudo -u "$MBS__LI__USER" "sh" -c "echo export SOPS_AGE_KEY_FILE=/srv/docker/age.key >> \"$profile_user_f\""
 				Mbs:Io:print "Added SOPS_AGE_KEY_FILE to $profile_user_f"
 			else
 				Mbs:Io:print "$profile_user_f already configured with SOPS_AGE_KEY_FILE"
 			fi
 
-			local inst_type="${LI__KOMODO_PREP__TYPE:=komodoperiphery}"
+			local inst_type="${MBS__LI__KOMODO_PREP__TYPE:=komodoperiphery}"
 
 			mkdir -p "/srv/docker/stacks/$inst_type"
 			mkdir -p "/srv/docker/data/$inst_type"
 
-			echo "$LI__KOMODO_PREP__SOPS_KEY" >/srv/docker/age.key
+			echo "$MBS__LI__KOMODO_PREP__SOPS_KEY" >/srv/docker/age.key
 
 			# FIXME: Copy komodoperiphery/komodo stacks (from an encrypted zip)
 
@@ -1173,7 +1171,7 @@ function _run_step_1() {
 	Mbs:Io:print "Second init pass"
 
 	# Docker - login
-	if Mbs:Var:isTrue "$LI__DOCKER_LOGIN__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__DOCKER_LOGIN__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s1.docker-login.sh]
 
@@ -1183,7 +1181,7 @@ function _run_step_1() {
 			local docker_group="docker"
 
 			if Mbs:Var:isEmpty "$home_user_d"; then
-				home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+				home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
 			fi
 			local auth_f="$home_user_d/.docker/config.json"
 
@@ -1195,29 +1193,29 @@ function _run_step_1() {
 			Mbs:Io:print "Please prepare docker hub user and password"
 			Mbs:Io:paktc
 
-			if Mbs:Var:isEmpty "$LI__USER"; then
-				Mbs:Io:error "Missing LI__USER, please enter the normal user name and press enter"
+			if Mbs:Var:isEmpty "$MBS__LI__USER"; then
+				Mbs:Io:error "Missing MBS__LI__USER, please enter the normal user name and press enter"
 				read -r
-				LI__USER="$REPLY"
+				MBS__LI__USER="$REPLY"
 			fi
 
-			if ! Mbs:User:isNormal "$LI__USER"; then
-				Mbs:Io:error "LI__USER problem, it must be set, it must be a normal user, it must exists"
+			if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+				Mbs:Io:error "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
 				return 1
 			fi
 
-			if ! Mbs:User:isCurrentInGroup "$LI__USER" "$docker_group"; then
-				Mbs:Io:error "LI__USER found, $LI__USER isn't in $docker_group group"
-				read -p "Do you want to add $LI__USER to $docker_group group? Y/N: " -n 1 -r
+			if ! Mbs:User:isCurrentInGroup "$MBS__LI__USER" "$docker_group"; then
+				Mbs:Io:error "MBS__LI__USER found, $MBS__LI__USER isn't in $docker_group group"
+				read -p "Do you want to add $MBS__LI__USER to $docker_group group? Y/N: " -n 1 -r
 				if [[ $REPLY =~ ^[Yy]$ ]]; then
-					usermod -aG "$docker_group" "$LI__USER"
+					usermod -aG "$docker_group" "$MBS__LI__USER"
 				else
 					Mbs:Io:error "Cannot proceed"
 					return 1
 				fi
 			fi
 
-			sudo -u "$LI__USER" docker login -u "$LI__DOCKER_LOGIN__USERNAME"
+			sudo -u "$MBS__LI__USER" docker login -u "$MBS__LI__DOCKER_LOGIN__USERNAME"
 			return 0
 		}
 		#endregion Bundler import [linux-init.mod/s1.docker-login.sh]
@@ -1225,7 +1223,7 @@ function _run_step_1() {
 	fi
 
 	# Docker - custom bridge network
-	if Mbs:Var:isTrue "$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__DOCKER_NETWORK_CUSTOM_BRIDGE__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s1.docker-custom-bridge.sh]
 
@@ -1234,7 +1232,7 @@ function _run_step_1() {
 
 			local docker_group="docker"
 
-			Mbs:Var:isSet "LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME" || return 1
+			Mbs:Var:isSet "MBS__LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME" || return 1
 
 			if ! Mbs:User:isCurrentRunningAsRoot 2>/dev/null && ! Mbs:User:isCurrentInGroup "$docker_group"; then
 				Mbs:Io:error "Current user isn't in $docker_group group, cannot proceed"
@@ -1242,13 +1240,13 @@ function _run_step_1() {
 				return 1
 			fi
 
-			if docker network ls | grep "$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME" 1>/dev/null 2>&1; then
-				Mbs:Io:print "Docker bridge network '$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME' already exists, skipping"
+			if docker network ls | grep "$MBS__LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME" 1>/dev/null 2>&1; then
+				Mbs:Io:print "Docker bridge network '$MBS__LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME' already exists, skipping"
 				return 0
 			fi
 
-			docker network create "$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME"
-			Mbs:Io:print "Docker custom bridge network '$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME' created"
+			docker network create "$MBS__LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME"
+			Mbs:Io:print "Docker custom bridge network '$MBS__LI__DOCKER_NETWORK_CUSTOM_BRIDGE__NAME' created"
 			return 0
 		}
 		#endregion Bundler import [linux-init.mod/s1.docker-custom-bridge.sh]
@@ -1256,20 +1254,20 @@ function _run_step_1() {
 	fi
 
 	# Backup - restore
-	if Mbs:Var:isTrue "$LI__BACKUP_RESTORE__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__BACKUP_RESTORE__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s1.backup-restore.sh]
 
 		Mbs:LinuxInit:restoreBackup() {
 			Mbs:Io:print "Restoring backup"
 
-			Mbs:Var:isSet "LI__BACKUP_RESTORE__FILE_PATH" || return 1
+			Mbs:Var:isSet "MBS__LI__BACKUP_RESTORE__FILE_PATH" || return 1
 
-			if [ ! -f "$LI__BACKUP_RESTORE__FILE_PATH" ]; then
-				Mbs:Io:print "Cannot find $LI__BACKUP_RESTORE__FILE_PATH, please check"
+			if [ ! -f "$MBS__LI__BACKUP_RESTORE__FILE_PATH" ]; then
+				Mbs:Io:print "Cannot find $MBS__LI__BACKUP_RESTORE__FILE_PATH, please check"
 				return 1
 			else
-				tar --same-owner -xf "$LI__BACKUP_RESTORE__FILE_PATH" -C /
+				tar --same-owner -xf "$MBS__LI__BACKUP_RESTORE__FILE_PATH" -C /
 			fi
 
 			Mbs:Io:print "Backup restored"
@@ -1279,7 +1277,7 @@ function _run_step_1() {
 		Mbs:LinuxInit:restoreBackup || Mbs:Script:die "Failed to restore backup"
 	fi
 
-	if Mbs:Var:isTrue "$LI__DOCKER_COMPOSE_START__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__DOCKER_COMPOSE_START__IS_ENABLED"; then
 		Mbs:Io:printSep
 		#region Bundler import [linux-init.mod/s1.docker-compose-start.sh]
 
@@ -1293,16 +1291,16 @@ function _run_step_1() {
 				return 1
 			fi
 
-			Mbs:LinuxInit:checkConfig "LI__DOCKER_COMPOSE_START__FILE_PATH" || return 1
+			Mbs:LinuxInit:checkConfig "MBS__LI__DOCKER_COMPOSE_START__FILE_PATH" || return 1
 
-			if [ ! -f "$LI__DOCKER_COMPOSE_START__FILE_PATH" ]; then
-				Mbs:Io:error "Cannot find $LI__DOCKER_COMPOSE_START__FILE_PATH compose file, please check"
+			if [ ! -f "$MBS__LI__DOCKER_COMPOSE_START__FILE_PATH" ]; then
+				Mbs:Io:error "Cannot find $MBS__LI__DOCKER_COMPOSE_START__FILE_PATH compose file, please check"
 				Mbs:LinuxInit:paktc
 				return 1
 			fi
 
-			docker compose -f "$LI__DOCKER_COMPOSE_START__FILE_PATH" up -d
-			Mbs:Io:print "Services in $LI__DOCKER_COMPOSE_START__FILE_PATH compose file should be up and running"
+			docker compose -f "$MBS__LI__DOCKER_COMPOSE_START__FILE_PATH" up -d
+			Mbs:Io:print "Services in $MBS__LI__DOCKER_COMPOSE_START__FILE_PATH compose file should be up and running"
 
 			return 0
 		}

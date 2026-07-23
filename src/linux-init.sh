@@ -10,8 +10,8 @@ set -euo pipefail
 # !mbs keep
 _this_dir="$(cd -P "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" >/dev/null 2>&1 && pwd)"
 
-# !mbs include=linux-init.mod/linux-init.tpl.env
-cfg_tpl_content=$(base64 -w0 "$_this_dir/linux-init.mod/linux-init.tpl.env")
+# !mbs include=linux-init.mod/config.tpl.env
+cfg_tpl_content=$(base64 -w0 "$_this_dir/linux-init.mod/config.tpl.env")
 
 # shellcheck source=utils.mod/io.sh
 source "$_this_dir/utils.mod/io.sh"
@@ -83,11 +83,11 @@ run() {
 		Mbs:Script:die "This script must be run as root"
 	fi
 
-	if ! Mbs:User:isNormal "$LI__USER"; then
-		Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+	if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+		Mbs:Script:die "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
 	fi
 
-	home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+	home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
 
 	helper_f_content=$(<"$helper_f")
 
@@ -113,7 +113,7 @@ function _run_step_0() {
 	echo "Packages updated"
 
 	# Journal - limit size
-	if Mbs:Var:isTrue "$LI__JOURNAL_LIMIT__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__JOURNAL_LIMIT__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.journal-limit.sh
 		. "$li_modules_d/s0.journal-limit.sh"
@@ -121,7 +121,7 @@ function _run_step_0() {
 	fi
 
 	# RAM - set swappiness
-	if Mbs:Var:isTrue "$LI__RAM_SWAPPINESS__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__RAM_SWAPPINESS__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.swappiness.sh
 		. "$li_modules_d/s0.swappiness.sh"
@@ -129,7 +129,7 @@ function _run_step_0() {
 	fi
 
 	# APT - add Docker repo
-	if Mbs:Var:isTrue "$LI__ADD_DOCKER_APT_REPO__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__ADD_DOCKER_APT_REPO__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.apt-add-docker-repo.sh
 		. "$li_modules_d/s0.apt-add-docker-repo.sh"
@@ -137,7 +137,7 @@ function _run_step_0() {
 	fi
 
 	# APT - install packages
-	if Mbs:Var:isTrue "$LI__APT_INSTALL_PACKAGES__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__APT_INSTALL_PACKAGES__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.apt-install-pkgs.sh
 		. "$li_modules_d/s0.apt-install-pkgs.sh"
@@ -145,7 +145,7 @@ function _run_step_0() {
 	fi
 
 	# User - add to groups
-	if Mbs:Var:isTrue "$LI__USER_ADD_TO_GROUPS__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__USER_ADD_TO_GROUPS__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.user-groups.sh
 		. "$li_modules_d/s0.user-groups.sh"
@@ -153,7 +153,7 @@ function _run_step_0() {
 	fi
 
 	# User - sudo without password
-	if Mbs:Var:isTrue "$LI__PASSWORDLESS_SUDO__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__PASSWORDLESS_SUDO__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.user-passwordless-sudo.sh
 		. "$li_modules_d/s0.user-passwordless-sudo.sh"
@@ -161,7 +161,7 @@ function _run_step_0() {
 	fi
 
 	# Nano - enable syntax highlighting
-	if Mbs:Var:isTrue "$LI__NANO_SYNTAX_HIGHLIGHTING__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__NANO_SYNTAX_HIGHLIGHTING__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.nano-syntax-highlighting.sh
 		. "$li_modules_d/s0.nano-syntax-highlighting.sh"
@@ -169,7 +169,7 @@ function _run_step_0() {
 	fi
 
 	# Network - enable routing
-	if Mbs:Var:isTrue "$LI__NETWORK_ROUTING__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__NETWORK_ROUTING__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.network-routing.sh
 		. "$li_modules_d/s0.network-routing.sh"
@@ -177,7 +177,7 @@ function _run_step_0() {
 	fi
 
 	# Network - enable src valid mark
-	if Mbs:Var:isTrue "$LI__NETWORK_SRC_VALID_MARK__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__NETWORK_SRC_VALID_MARK__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.network-src-valid-mark.sh
 		. "$li_modules_d/s0.network-src-valid-mark.sh"
@@ -191,7 +191,7 @@ function _run_step_0() {
 	Mbs:LinuxInit:prepareSSH || Mbs:Script:die "Failed to prepare SSH"
 
 	# Services - docker
-	if Mbs:Var:isTrue "$LI__SRV_DOCKER_ENABLER__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__SRV_DOCKER_ENABLER__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.docker-service-enabler.sh
 		. "$li_modules_d/s0.docker-service-enabler.sh"
@@ -199,7 +199,7 @@ function _run_step_0() {
 	fi
 
 	# Git - config
-	if Mbs:Var:isTrue "$LI__GIT_CONFIG__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__GIT_CONFIG__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.git-config.sh
 		. "$li_modules_d/s0.git-config.sh"
@@ -207,7 +207,7 @@ function _run_step_0() {
 	fi
 
 	# Install oh-my-posh
-	if Mbs:Var:isTrue "$LI__INSTALL_OH_MY_POSH__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__INSTALL_OH_MY_POSH__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.install-oh-my-posh.sh
 		. "$li_modules_d/s0.install-oh-my-posh.sh"
@@ -215,7 +215,7 @@ function _run_step_0() {
 	fi
 
 	# Install SOPS
-	if Mbs:Var:isTrue "$LI__INSTALL_SOPS__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__INSTALL_SOPS__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.install-sops.sh
 		. "$li_modules_d/s0.install-sops.sh"
@@ -223,7 +223,7 @@ function _run_step_0() {
 	fi
 
 	# Prep Komodo
-	if Mbs:Var:isTrue "$LI__KOMODO_PREP__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__KOMODO_PREP__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s0.komodo-prep.sh
 		. "$li_modules_d/s0.komodo-prep.sh"
@@ -245,7 +245,7 @@ function _run_step_1() {
 	Mbs:Io:print "Second init pass"
 
 	# Docker - login
-	if Mbs:Var:isTrue "$LI__DOCKER_LOGIN__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__DOCKER_LOGIN__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s1.docker-login.sh
 		. "$li_modules_d/s1.docker-login.sh"
@@ -253,7 +253,7 @@ function _run_step_1() {
 	fi
 
 	# Docker - custom bridge network
-	if Mbs:Var:isTrue "$LI__DOCKER_NETWORK_CUSTOM_BRIDGE__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__DOCKER_NETWORK_CUSTOM_BRIDGE__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s1.docker-custom-bridge.sh
 		. "$li_modules_d/s1.docker-custom-bridge.sh"
@@ -261,14 +261,14 @@ function _run_step_1() {
 	fi
 
 	# Backup - restore
-	if Mbs:Var:isTrue "$LI__BACKUP_RESTORE__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__BACKUP_RESTORE__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s1.backup-restore.sh
 		. "$li_modules_d/s1.backup-restore.sh"
 		Mbs:LinuxInit:restoreBackup || Mbs:Script:die "Failed to restore backup"
 	fi
 
-	if Mbs:Var:isTrue "$LI__DOCKER_COMPOSE_START__IS_ENABLED"; then
+	if Mbs:Var:isTrue "$MBS__LI__DOCKER_COMPOSE_START__IS_ENABLED"; then
 		Mbs:Io:printSep
 		# shellcheck source=linux-init.mod/s1.docker-compose-start.sh
 		. "$li_modules_d/s1.docker-compose-start.sh"

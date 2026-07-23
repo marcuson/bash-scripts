@@ -3,12 +3,12 @@
 Mbs:LinuxInit:enableNanoSyntaxHighlighting() {
     Mbs:Io:print "Enabling Nano Syntax highlighting"
 
-    if ! Mbs:User:isNormal "$LI__USER"; then
-        Mbs:Script:die "\nLI__USER problem, it must be set, it must be a normal user, it must exists"
+    if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+        Mbs:Script:die "\nMBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
     fi
 
     if Mbs:Var:isEmpty "$home_user_d"; then
-        home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+        home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
     fi
 
     home_root_d=$(sudo -u root sh -c 'echo $HOME')
@@ -24,7 +24,7 @@ Mbs:LinuxInit:enableNanoSyntaxHighlighting() {
     fi
 
     if [ ! -f "$nano_conf_user_f" ] || ! grep -q 'include "/usr/share/nano/\*.nanorc' "$nano_conf_user_f"; then
-        echo -e 'include "/usr/share/nano/*.nanorc"\nset linenumbers' | sudo -u "$LI__USER" tee -a "$nano_conf_user_f" >/dev/null
+        echo -e 'include "/usr/share/nano/*.nanorc"\nset linenumbers' | sudo -u "$MBS__LI__USER" tee -a "$nano_conf_user_f" >/dev/null
     else
         Mbs:Io:print "$nano_conf_user_f already configured"
     fi

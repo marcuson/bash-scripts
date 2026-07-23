@@ -3,16 +3,16 @@
 Mbs:LinuxInit:komodoPrep() {
     Mbs:Io:print "Prepare Komodo"
 
-    if ! Mbs:User:isNormal "$LI__USER"; then
-        Mbs:Script:die "LI__USER problem, it must be set, it must be a normal user, it must exists"
+    if ! Mbs:User:isNormal "$MBS__LI__USER"; then
+        Mbs:Script:die "MBS__LI__USER problem, it must be set, it must be a normal user, it must exists"
     fi
 
     if Mbs:Var:isEmpty "$home_user_d"; then
-        home_user_d=$(sudo -u "$LI__USER" sh -c 'echo $HOME')
+        home_user_d=$(sudo -u "$MBS__LI__USER" sh -c 'echo $HOME')
     fi
 
-    if Mbs:LinuxInit:isVarEmpty "$LI__KOMODO_PREP__SOPS_KEY"; then
-        Mbs:Script:die "LI__KOMODO_PREP__SOPS_KEY env var must be set"
+    if Mbs:LinuxInit:isVarEmpty "$MBS__LI__KOMODO_PREP__SOPS_KEY"; then
+        Mbs:Script:die "MBS__LI__KOMODO_PREP__SOPS_KEY env var must be set"
     fi
 
     local home_root_d="$HOME"
@@ -27,18 +27,18 @@ Mbs:LinuxInit:komodoPrep() {
     fi
 
     if [ ! -f "$profile_user_f" ] || ! grep -q 'SOPS_AGE_KEY_FILE' "$profile_user_f"; then
-        sudo -u "$LI__USER" "sh" -c "echo export SOPS_AGE_KEY_FILE=/srv/docker/age.key >> \"$profile_user_f\""
+        sudo -u "$MBS__LI__USER" "sh" -c "echo export SOPS_AGE_KEY_FILE=/srv/docker/age.key >> \"$profile_user_f\""
         Mbs:Io:print "Added SOPS_AGE_KEY_FILE to $profile_user_f"
     else
         Mbs:Io:print "$profile_user_f already configured with SOPS_AGE_KEY_FILE"
     fi
 
-    local inst_type="${LI__KOMODO_PREP__TYPE:=komodoperiphery}"
+    local inst_type="${MBS__LI__KOMODO_PREP__TYPE:=komodoperiphery}"
 
     mkdir -p "/srv/docker/stacks/$inst_type"
     mkdir -p "/srv/docker/data/$inst_type"
 
-    echo "$LI__KOMODO_PREP__SOPS_KEY" >/srv/docker/age.key
+    echo "$MBS__LI__KOMODO_PREP__SOPS_KEY" >/srv/docker/age.key
 
     # FIXME: Copy komodoperiphery/komodo stacks (from an encrypted zip)
 

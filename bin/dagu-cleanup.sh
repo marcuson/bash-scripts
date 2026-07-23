@@ -220,8 +220,6 @@ Mbs:Script:isFunc() {
 
 Mbs:Script:die() {
 	Mbs:Io:error "$@"
-
-	# FIXME: Unregister traps
 	exit 1
 }
 #endregion Bundler import [utils.mod/script.sh]

@@ -12,16 +12,16 @@ Mbs:LinuxInit:startDockerCompose() {
         return 1
     fi
 
-    Mbs:LinuxInit:checkConfig "LI__DOCKER_COMPOSE_START__FILE_PATH" || return 1
+    Mbs:LinuxInit:checkConfig "MBS__LI__DOCKER_COMPOSE_START__FILE_PATH" || return 1
 
-    if [ ! -f "$LI__DOCKER_COMPOSE_START__FILE_PATH" ]; then
-        Mbs:Io:error "Cannot find $LI__DOCKER_COMPOSE_START__FILE_PATH compose file, please check"
+    if [ ! -f "$MBS__LI__DOCKER_COMPOSE_START__FILE_PATH" ]; then
+        Mbs:Io:error "Cannot find $MBS__LI__DOCKER_COMPOSE_START__FILE_PATH compose file, please check"
         Mbs:LinuxInit:paktc
         return 1
     fi
 
-    docker compose -f "$LI__DOCKER_COMPOSE_START__FILE_PATH" up -d
-    Mbs:Io:print "Services in $LI__DOCKER_COMPOSE_START__FILE_PATH compose file should be up and running"
+    docker compose -f "$MBS__LI__DOCKER_COMPOSE_START__FILE_PATH" up -d
+    Mbs:Io:print "Services in $MBS__LI__DOCKER_COMPOSE_START__FILE_PATH compose file should be up and running"
 
     return 0
 }

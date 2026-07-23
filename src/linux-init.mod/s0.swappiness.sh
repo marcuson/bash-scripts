@@ -6,7 +6,7 @@ Mbs:LinuxInit:setSwappiness() {
     # Dirs
     local swappiness_conf_f="/etc/sysctl.d/swappiness.conf"
     # Apply default if conf is not found
-    local swappiness="${LI__RAM_SWAPPINESS__VALUE:=$swappiness_default}"
+    local swappiness="${MBS__LI__RAM_SWAPPINESS__VALUE:=$swappiness_default}"
 
     Mbs:Io:print "Setting custom swappiness"
     Mbs:Io:print "New swappiness value: $swappiness"

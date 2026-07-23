@@ -9,8 +9,8 @@ Mbs:LinuxInit:limitJournal() {
     local journal_conf_f="${journal_conf_d}/size.conf"
 
     # Apply default if conf is not found
-    local system_max="${LI__JOURNAL_LIMIT__SYSTEM_MAX:=$config_journal_system_max_default}"
-    local file_max="${LI__JOURNAL_LIMIT__FILE_MAX:=$config_journal_file_max_default}"
+    local system_max="${MBS__LI__JOURNAL_LIMIT__SYSTEM_MAX:=$config_journal_system_max_default}"
+    local file_max="${MBS__LI__JOURNAL_LIMIT__FILE_MAX:=$config_journal_file_max_default}"
 
     Mbs:Io:print "Limit journal size"
     mkdir -p "$journal_conf_d"
